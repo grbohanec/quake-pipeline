@@ -6,19 +6,25 @@ cd /d "%~dp0"
 echo === quake-pipeline setup ===
 echo.
 
-python -c "import sys; assert sys.version_info >= (3, 10)" >nul 2>nul
+rem Use "python" if it's on PATH, otherwise fall back to the "py" launcher.
+set "PY=python"
+%PY% -c "import sys; assert sys.version_info >= (3, 10)" >nul 2>nul
 if errorlevel 1 (
-    echo Python 3.10 or newer was not found.
-    echo Install it from https://www.python.org/downloads/ and tick "Add python.exe to PATH",
-    echo then double-click this file again.
-    goto :end
+    set "PY=py -3"
+    py -3 -c "import sys; assert sys.version_info >= (3, 10)" >nul 2>nul
+    if errorlevel 1 (
+        echo Python 3.10 or newer was not found.
+        echo Install it with:  winget install -e --id Python.Python.3.14
+        echo then double-click this file again.
+        goto :end
+    )
 )
-python --version
+%PY% --version
 
 if not exist .venv (
     echo.
     echo [1/4] Creating virtual environment...
-    python -m venv .venv || goto :failed
+    %PY% -m venv .venv || goto :failed
 ) else (
     echo.
     echo [1/4] Virtual environment already exists, skipping.
