@@ -1,0 +1,10 @@
+# Data lives outside git (local disk or S3), never in the repo
+data/
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store

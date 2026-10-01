@@ -1,0 +1,69 @@
+# quake-pipeline
+
+An earthquake data pipeline that pulls live data from the USGS (and soon JMA), stores it in layered Parquet files, and feeds a severity-prediction model.
+
+This is the rebuilt version of my [Earthquake Severity Prediction Project](https://github.com/grbohanec/Earthquake-Severity-Prediction-Project) (v1). That was a one-time Spark notebook run on 51 hand-downloaded CSVs; this one ingests data automatically and keeps itself up to date.
+
+## Status
+
+- [x] **USGS ingestion**: backfill and incremental pulls, M2.0+
+- [ ] Cleaned / modeled layers (typed, de-duplicated, partitioned Parquet)
+- [ ] Scheduled daily refresh (GitHub Actions)
+- [ ] Data quality checks
+- [ ] JMA ingestion (small quakes in Japan)
+- [ ] Model rebuild
+- [ ] Dashboard
+
+## Setup
+
+```bash
+python -m venv .venv
+source .venv/bin/activate      # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+```
+
+## Ingesting USGS data
+
+**First run (backfill).** Pulls every M2.0+ earthquake in a date range. Start small to check it works:
+
+```bash
+quake-ingest-usgs --backfill --start 2026-09-01
+```
+
+Then the full history. It takes a while; if it's interrupted, run the same command again and it continues where it stopped:
+
+```bash
+quake-ingest-usgs --backfill --start 1900-01-01
+```
+
+**After that (incremental).** Pulls only events that are new or were revised since the last run:
+
+```bash
+quake-ingest-usgs --incremental
+```
+
+Options: `--min-mag` (default 2.0), `--lookback-days` (default 30), `--data-dir` (default `data/`), `--restart` (ignore saved backfill progress and start over).
+
+### How it works
+
+- **The 20,000-event limit.** USGS returns at most 20,000 events per request. Before downloading, the script asks USGS how many events a date range holds and keeps halving the range until each piece fits.
+- **Raw layer.** Each piece is saved as-is to `data/raw/usgs/run_id=<timestamp>/`, with every column kept as text. Nothing is cleaned or dropped here, so the raw layer is always a faithful copy of what USGS sent.
+- **Incremental pulls.** USGS revises events after they happen (magnitudes get refined, locations corrected). The script tracks the latest `updated` timestamp it has seen in `data/state/usgs.json` and next time asks only for events updated after that. Revisions are resolved in the cleaned layer by keeping the newest version of each event `id`.
+- **Reliability.** Rate limits and server errors are retried with backoff, and progress is saved after every piece, so an interrupted backfill picks up from where it stopped instead of starting over.
+
+## Tests
+
+```bash
+pytest
+```
+
+The tests use a fake USGS API, so they run offline.
+
+## Layout
+
+```
+src/quake_pipeline/
+  ingest/usgs.py      USGS ingestion
+tests/                unit tests
+data/                 (git-ignored) raw/, state/, and later cleaned/
+```

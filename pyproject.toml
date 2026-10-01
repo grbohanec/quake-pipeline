@@ -1,0 +1,27 @@
+[project]
+name = "quake-pipeline"
+version = "0.1.0"
+description = "Earthquake data pipeline: USGS/JMA ingestion, lakehouse storage, and severity modeling"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0",
+    "pyarrow>=14",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+quake-ingest-usgs = "quake_pipeline.ingest.usgs:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
