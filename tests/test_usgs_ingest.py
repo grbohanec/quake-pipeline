@@ -207,3 +207,19 @@ def test_restart_ignores_saved_progress(paths):
     usgs.run(window, 2.0, out_dir, state_path, client=USGSClient(session=fake))
     state = usgs.run(window, 2.0, out_dir, state_path, client=USGSClient(session=fake), restart=True)
     assert state["last_run_events"] == 10
+
+
+def test_new_backfill_start_is_not_skipped(paths):
+    # A small test pull, then the full history: the second must not be
+    # mistaken for "already done" just because the first finished recently.
+    out_dir, state_path = paths
+    old = datetime(2000, 1, 1, tzinfo=UTC)
+    recent = datetime(2024, 1, 1, tzinfo=UTC)
+    events = make_events(10, old, timedelta(days=1)) + \
+        [e | {"id": f"r{i}"} for i, e in enumerate(make_events(5, recent, timedelta(hours=1)))]
+    fake = FakeUSGS(events)
+    end = recent + timedelta(days=1)
+
+    usgs.run(Window(recent, end), 2.0, out_dir, state_path, client=USGSClient(session=fake))
+    state = usgs.run(Window(old, end), 2.0, out_dir, state_path, client=USGSClient(session=fake))
+    assert state["last_run_events"] == 15

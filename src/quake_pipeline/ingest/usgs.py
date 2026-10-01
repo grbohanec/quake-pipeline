@@ -181,6 +181,11 @@ def run(
     # everything before the saved cursor is already on disk.
     if is_backfill and restart:
         state.pop("backfill_done_until", None)
+    # Only resume if this is the same backfill (same start date) as last time;
+    # a backfill with a different start is a new job and pulls its whole range.
+    if is_backfill and state.get("backfill_start") != _iso(window.start):
+        state.pop("backfill_done_until", None)
+        state["backfill_start"] = _iso(window.start)
     if is_backfill and "backfill_done_until" in state:
         cursor = _parse_dt(state["backfill_done_until"])
         if window.start < cursor < window.end:
