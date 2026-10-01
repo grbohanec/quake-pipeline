@@ -7,7 +7,7 @@ This is the rebuilt version of my [Earthquake Severity Prediction Project](https
 ## Status
 
 - [x] **USGS ingestion**: backfill and incremental pulls, M2.0+
-- [ ] Cleaned / modeled layers (typed, de-duplicated, partitioned Parquet)
+- [x] **Cleaned layer**: typed, de-duplicated, validated, partitioned by year
 - [ ] Scheduled daily refresh (GitHub Actions)
 - [ ] Data quality checks
 - [ ] JMA ingestion (small quakes in Japan)
@@ -51,6 +51,22 @@ Options: `--min-mag` (default 2.0), `--lookback-days` (default 30), `--data-dir`
 - **Incremental pulls.** USGS revises events after they happen (magnitudes get refined, locations corrected). The script tracks the latest `updated` timestamp it has seen in `data/state/usgs.json` and next time asks only for events updated after that. Revisions are resolved in the cleaned layer by keeping the newest version of each event `id`.
 - **Reliability.** Rate limits and server errors are retried with backoff, and progress is saved after every piece, so an interrupted backfill picks up from where it stopped instead of starting over.
 
+## Building the cleaned layer
+
+```bash
+quake-clean
+```
+
+Reads every raw file and writes one tidy dataset to `data/clean/usgs/year=YYYY/`:
+
+- **Types.** Text becomes proper timestamps and numbers; blank values become nulls, not zeros.
+- **Clear column names.** `magType` becomes `mag_type`, `depth` becomes `depth_km`, and so on.
+- **One row per earthquake.** Overlapping downloads and USGS revisions are collapsed, keeping the newest version of each event.
+- **Sanity checks.** Rows missing a time, location or magnitude, or with impossible values, are dropped, and the run reports how many were dropped and why.
+- **Safe rebuilds.** The layer is built in a temporary folder and swapped in only when complete.
+
+Built with DuckDB, which streams through the files rather than loading everything into memory. The original v1 dataset (1M rows) cleans in a few seconds.
+
 ## Tests
 
 ```bash
@@ -63,7 +79,8 @@ The tests use a fake USGS API, so they run offline.
 
 ```
 src/quake_pipeline/
-  ingest/usgs.py      USGS ingestion
+  ingest/usgs.py      USGS ingestion  (source -> raw)
+  transform/clean.py  cleaning        (raw -> clean)
 tests/                unit tests
-data/                 (git-ignored) raw/, state/, and later cleaned/
+data/                 (git-ignored) raw/, clean/, state/
 ```
