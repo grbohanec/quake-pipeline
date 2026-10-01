@@ -28,6 +28,8 @@ def make_events(n, start, step, mag="3.1", updated=None):
 
 
 class FakeResponse:
+    status_code = 200
+
     def __init__(self, text="", json_data=None):
         self.text = text
         self._json = json_data
@@ -223,3 +225,37 @@ def test_new_backfill_start_is_not_skipped(paths):
     usgs.run(Window(recent, end), 2.0, out_dir, state_path, client=USGSClient(session=fake))
     state = usgs.run(Window(old, end), 2.0, out_dir, state_path, client=USGSClient(session=fake))
     assert state["last_run_events"] == 15
+
+
+class TimesOutOnBigRanges(FakeUSGS):
+    """Like real USGS: /count gives up (504) when asked about too long a range."""
+
+    def __init__(self, events, max_days):
+        super().__init__(events)
+        self.max_days = max_days
+
+    def get(self, url, params, timeout):
+        span = usgs._parse_dt(str(params["endtime"])) - usgs._parse_dt(str(params["starttime"]))
+        if url.endswith("/count") and span > timedelta(days=self.max_days):
+            import requests
+            raise requests.exceptions.RetryError("too many 504 error responses")
+        return super().get(url, params, timeout)
+
+
+def test_long_backfill_is_cut_into_years():
+    w = Window(datetime(1880, 1, 1, tzinfo=UTC), datetime(2026, 10, 1, tzinfo=UTC))
+    years = w.by_year()
+    assert len(years) == 147
+    assert years[0].start.year == 1880 and years[-1].end == w.end
+    assert all(a.end == b.start for a, b in zip(years, years[1:]))
+
+
+def test_server_timeout_splits_window(paths):
+    out_dir, state_path = paths
+    start = datetime(2020, 1, 1, tzinfo=UTC)
+    events = make_events(1000, start, timedelta(hours=6))
+    fake = TimesOutOnBigRanges(events, max_days=100)  # even one year is "too big"
+    usgs.run(Window(start, start + timedelta(days=300)), 2.0, out_dir, state_path,
+             client=USGSClient(session=fake))
+    df = read_raw(out_dir)
+    assert len(df) == 1000 and df["id"].is_unique

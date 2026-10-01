@@ -38,6 +38,7 @@ BASE_URL = "https://earthquake.usgs.gov/fdsnws/event/1"
 MAX_EVENTS_PER_QUERY = 20_000  # hard limit enforced by USGS
 SAFETY_MARGIN = 0.9  # stay a little under the cap in case events arrive mid-pull
 MIN_WINDOW = timedelta(minutes=1)  # never split finer than this
+MIN_TIMEOUT_SPLIT = timedelta(days=1)  # smallest window we'll split because USGS timed out
 
 DEFAULT_MIN_MAG = 2.0
 DEFAULT_LOOKBACK_DAYS = 30  # how far back incremental runs look for revised events
@@ -52,6 +53,16 @@ class Window:
     def split(self) -> tuple["Window", "Window"]:
         mid = self.start + (self.end - self.start) / 2
         return Window(self.start, mid), Window(mid, self.end)
+
+    def by_year(self) -> list["Window"]:
+        """Cut into calendar-year pieces, so no single request covers decades of data."""
+        pieces, start = [], self.start
+        while start < self.end:
+            next_year = datetime(start.year + 1, 1, 1, tzinfo=timezone.utc)
+            end = min(next_year, self.end)
+            pieces.append(Window(start, end))
+            start = end
+        return pieces
 
     def __str__(self) -> str:
         return f"{_iso(self.start)} -> {_iso(self.end)}"
@@ -81,6 +92,10 @@ def make_session() -> requests.Session:
     return session
 
 
+class ServerTimeout(Exception):
+    """USGS gave up on a request (504 / read timeout), usually because it was too big."""
+
+
 class USGSClient:
     def __init__(self, session: requests.Session | None = None, timeout: int = 120):
         self.session = session or make_session()
@@ -100,7 +115,16 @@ class USGSClient:
 
     def count(self, window: Window, min_mag: float, updated_after: datetime | None = None) -> int:
         params = self._params(window, min_mag, updated_after) | {"format": "geojson"}
-        resp = self.session.get(f"{BASE_URL}/count", params=params, timeout=self.timeout)
+        try:
+            resp = self.session.get(f"{BASE_URL}/count", params=params, timeout=self.timeout)
+        except requests.exceptions.ReadTimeout as e:
+            raise ServerTimeout(str(e)) from e
+        except requests.exceptions.RetryError as e:
+            if "504" in str(e):
+                raise ServerTimeout(str(e)) from e
+            raise
+        if resp.status_code == 504:
+            raise ServerTimeout(f"504 for {window}")
         resp.raise_for_status()
         return int(resp.json()["count"])
 
@@ -122,10 +146,18 @@ class USGSClient:
     ) -> Iterator[tuple[Window, int]]:
         """Yield (window, event_count) pieces that each fit under the USGS limit."""
         limit = int(MAX_EVENTS_PER_QUERY * SAFETY_MARGIN)
-        stack = [window]
+        stack = list(reversed(window.by_year()))  # pop() takes the earliest year first
         while stack:
             w = stack.pop()
-            n = self.count(w, min_mag, updated_after)
+            try:
+                n = self.count(w, min_mag, updated_after)
+            except ServerTimeout:
+                if (w.end - w.start) <= MIN_TIMEOUT_SPLIT:
+                    raise
+                log.info("USGS timed out counting %s; splitting it", w)
+                left, right = w.split()
+                stack.extend([right, left])
+                continue
             if n == 0:
                 continue
             if n <= limit or (w.end - w.start) <= MIN_WINDOW:
