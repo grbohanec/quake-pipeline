@@ -33,7 +33,7 @@ quake-ingest-usgs --backfill --start 2026-09-01
 Then the full history. It takes a while; if it's interrupted, run the same command again and it continues where it stopped:
 
 ```bash
-quake-ingest-usgs --backfill --start 1900-01-01
+quake-ingest-usgs --backfill --start 1880-01-01
 ```
 
 **After that (incremental).** Pulls only events that are new or were revised since the last run:
@@ -46,7 +46,7 @@ Options: `--min-mag` (default 2.0), `--lookback-days` (default 30), `--data-dir`
 
 ### How it works
 
-- **The 20,000-event limit.** USGS returns at most 20,000 events per request. Before downloading, the script asks USGS how many events a date range holds and keeps halving the range until each piece fits.
+- **The 20,000-event limit.** USGS returns at most 20,000 events per request. Before downloading, the script asks USGS how many events a date range holds and keeps halving the range until each piece fits. Long backfills are first cut into one-year chunks, and if USGS times out on a chunk, that chunk is split again.
 - **Raw layer.** Each piece is saved as-is to `data/raw/usgs/run_id=<timestamp>/`, with every column kept as text. Nothing is cleaned or dropped here, so the raw layer is always a faithful copy of what USGS sent.
 - **Incremental pulls.** USGS revises events after they happen (magnitudes get refined, locations corrected). The script tracks the latest `updated` timestamp it has seen in `data/state/usgs.json` and next time asks only for events updated after that. Revisions are resolved in the cleaned layer by keeping the newest version of each event `id`.
 - **Reliability.** Rate limits and server errors are retried with backoff, and progress is saved after every piece, so an interrupted backfill picks up from where it stopped instead of starting over.
