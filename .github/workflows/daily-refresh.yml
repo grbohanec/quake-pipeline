@@ -1,0 +1,78 @@
+# Daily refresh: pull new/revised earthquakes from USGS, rebuild the cleaned
+# layer, and sync everything back to S3.
+#
+# Auth uses GitHub OIDC -> an IAM role (no AWS keys stored in GitHub).
+# Required repository variables (Settings > Secrets and variables > Actions > Variables):
+#   AWS_ROLE_ARN   arn:aws:iam::<account-id>:role/<role-name>
+#   S3_BUCKET      e.g. gabe-quake-pipeline
+#   AWS_REGION     e.g. us-east-2
+
+name: Daily refresh
+
+on:
+  schedule:
+    - cron: "17 21 * * *"  # 21:17 UTC = 06:17 Tokyo, every day
+  workflow_dispatch:        # "Run workflow" button for manual runs
+
+permissions:
+  id-token: write  # lets the job request an OIDC token for AWS
+  contents: read
+
+concurrency:
+  group: daily-refresh
+  cancel-in-progress: false  # never run two refreshes on the same data at once
+
+env:
+  S3_DATA: s3://${{ vars.S3_BUCKET }}/data
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pipeline
+        run: pip install -e .
+
+      - name: Authenticate to AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Download raw data and state from S3
+        # The cleaned layer is rebuilt from raw every run, so it isn't downloaded.
+        run: |
+          aws s3 sync "$S3_DATA/raw" data/raw --only-show-errors
+          aws s3 sync "$S3_DATA/state" data/state --only-show-errors
+          test -f data/state/usgs.json || { echo "No state file in S3 -- run a backfill first"; exit 1; }
+
+      - name: Ingest new and revised events
+        run: quake-ingest-usgs --incremental
+
+      - name: Rebuild cleaned layer
+        run: quake-clean
+
+      - name: Upload results to S3
+        # Raw files are append-only. The cleaned layer is replaced wholesale,
+        # so --delete removes files that no longer exist in the new build.
+        run: |
+          aws s3 sync data/raw "$S3_DATA/raw" --only-show-errors
+          aws s3 sync data/state "$S3_DATA/state" --only-show-errors
+          aws s3 sync data/clean "$S3_DATA/clean" --delete --only-show-errors
+
+      - name: Summary
+        run: |
+          python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          s = json.load(open("data/state/usgs.json"))
+          print("### Daily refresh")
+          print(f"- New or revised events this run: **{s.get('last_run_events', 0)}**")
+          print(f"- Latest USGS update seen: `{s.get('max_updated')}`")
+          EOF

@@ -8,7 +8,7 @@ This is the rebuilt version of my [Earthquake Severity Prediction Project](https
 
 - [x] **USGS ingestion**: backfill and incremental pulls, M2.0+
 - [x] **Cleaned layer**: typed, de-duplicated, validated, partitioned by year
-- [ ] Scheduled daily refresh (GitHub Actions)
+- [x] **Daily refresh**: GitHub Actions pulls new quakes every morning and syncs to S3 (needs AWS setup, see below)
 - [ ] Data quality checks
 - [ ] JMA ingestion (small quakes in Japan)
 - [ ] Model rebuild
@@ -66,6 +66,17 @@ Reads every raw file and writes one tidy dataset to `data/clean/usgs/year=YYYY/`
 - **Safe rebuilds.** The layer is built in a temporary folder and swapped in only when complete.
 
 Built with DuckDB, which streams through the files rather than loading everything into memory. The original v1 dataset (1M rows) cleans in a few seconds.
+
+## Daily refresh (GitHub Actions + S3)
+
+`.github/workflows/daily-refresh.yml` runs every day at 06:17 Tokyo time (and on demand from the Actions tab):
+
+1. Downloads `data/raw` and `data/state` from S3.
+2. Runs `quake-ingest-usgs --incremental` to pull new and revised events.
+3. Rebuilds the cleaned layer with `quake-clean`.
+4. Syncs raw, state and clean back to S3.
+
+It authenticates to AWS with **GitHub OIDC**: GitHub issues a short-lived token that an IAM role trusts, so no AWS access keys are stored anywhere. It needs three repository variables: `AWS_ROLE_ARN`, `S3_BUCKET` and `AWS_REGION`.
 
 ## Tests
 
