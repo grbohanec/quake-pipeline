@@ -93,6 +93,7 @@ def build(data_dir: Path) -> dict:
 
     con = duckdb.connect()
     con.execute("SET TimeZone = 'UTC'")
+    con.execute("SET enable_progress_bar = false")  # keep CI logs readable
     con.execute(f"CREATE TEMP VIEW typed AS {_typed_select(raw_glob)}")
 
     raw_rows = con.execute("SELECT count(*) FROM typed").fetchone()[0]
