@@ -1,11 +1,13 @@
 # Daily refresh: pull new/revised earthquakes from USGS, rebuild the cleaned
 # layer, and sync everything back to S3.
 #
-# Auth uses GitHub OIDC -> an IAM role (no AWS keys stored in GitHub).
-# Required repository variables (Settings > Secrets and variables > Actions > Variables):
-#   AWS_ROLE_ARN   arn:aws:iam::<account-id>:role/<role-name>
-#   S3_BUCKET      e.g. gabe-quake-pipeline
-#   AWS_REGION     e.g. us-east-2
+# Repository settings (Settings > Secrets and variables > Actions):
+#   Variables:  S3_BUCKET   e.g. gabe-quake-pipeline
+#               AWS_REGION  e.g. us-east-2
+#   Auth, one of:
+#     - Variable AWS_ROLE_ARN: an IAM role trusted via GitHub OIDC (preferred, no stored keys)
+#     - Secrets AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY: an IAM user limited to
+#       s3://<bucket>/data/* (used when the account can't create OIDC providers)
 
 name: Daily refresh
 
@@ -40,10 +42,21 @@ jobs:
       - name: Install pipeline
         run: pip install -e .
 
-      - name: Authenticate to AWS
+      # Preferred: OIDC role (no stored keys), used when AWS_ROLE_ARN is set.
+      - name: Authenticate to AWS (OIDC role)
+        if: vars.AWS_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Fallback: access key for an IAM user limited to this bucket's data/ prefix.
+      - name: Authenticate to AWS (access key)
+        if: vars.AWS_ROLE_ARN == ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Download raw data and state from S3
