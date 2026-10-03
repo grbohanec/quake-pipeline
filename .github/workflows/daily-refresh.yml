@@ -46,7 +46,7 @@ jobs:
       # Preferred: OIDC role (no stored keys), used when AWS_ROLE_ARN is set.
       - name: Authenticate to AWS (OIDC role)
         if: vars.AWS_ROLE_ARN != ''
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -54,7 +54,7 @@ jobs:
       # Fallback: access key for an IAM user limited to this bucket's data/ prefix.
       - name: Authenticate to AWS (access key)
         if: vars.AWS_ROLE_ARN == ''
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
