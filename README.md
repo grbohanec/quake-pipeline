@@ -76,7 +76,7 @@ Built with DuckDB, which streams through the files rather than loading everythin
 3. Rebuilds the cleaned layer with `quake-clean`.
 4. Syncs raw, state and clean back to S3.
 
-It needs two repository variables, `S3_BUCKET` and `AWS_REGION`, plus one way to authenticate:
+The bucket and region default to `gabe-quake-pipeline` and `us-east-2` (override them with repository variables `S3_BUCKET` and `AWS_REGION`). It needs one way to authenticate:
 
 - **GitHub OIDC (preferred).** Set the variable `AWS_ROLE_ARN` to an IAM role that trusts GitHub's OIDC provider. GitHub issues a short-lived token, so no AWS keys are stored anywhere.
 - **Access key (fallback).** Set the secrets `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for an IAM user whose only permission is reading and writing `s3://<bucket>/data/*`. This project currently uses this, because its AWS account type blocks creating OIDC providers.
