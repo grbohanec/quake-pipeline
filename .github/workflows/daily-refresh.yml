@@ -2,8 +2,7 @@
 # layer, and sync everything back to S3.
 #
 # Repository settings (Settings > Secrets and variables > Actions):
-#   Variables:  S3_BUCKET   e.g. gabe-quake-pipeline
-#               AWS_REGION  e.g. us-east-2
+#   Optional variables S3_BUCKET / AWS_REGION override the defaults in `env` below.
 #   Auth, one of:
 #     - Variable AWS_ROLE_ARN: an IAM role trusted via GitHub OIDC (preferred, no stored keys)
 #     - Secrets AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY: an IAM user limited to
@@ -25,7 +24,9 @@ concurrency:
   cancel-in-progress: false  # never run two refreshes on the same data at once
 
 env:
-  S3_DATA: s3://${{ vars.S3_BUCKET }}/data
+  S3_BUCKET: ${{ vars.S3_BUCKET || 'gabe-quake-pipeline' }}
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
+  S3_DATA: s3://${{ vars.S3_BUCKET || 'gabe-quake-pipeline' }}/data
 
 jobs:
   refresh:
@@ -48,7 +49,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
       # Fallback: access key for an IAM user limited to this bucket's data/ prefix.
       - name: Authenticate to AWS (access key)
@@ -57,7 +58,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ vars.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Download raw data and state from S3
         # The cleaned layer is rebuilt from raw every run, so it isn't downloaded.
