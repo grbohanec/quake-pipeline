@@ -13,11 +13,20 @@ RAW_COLS = list(clean.COLUMNS)
 
 def raw_row(**kw):
     row = {c: "" for c in RAW_COLS}
-    row.update({
-        "id": "us001", "time": "2024-03-05T10:00:00.000Z", "updated": "2024-03-05T10:05:00.000Z",
-        "latitude": "35.6", "longitude": "139.7", "depth": "10", "mag": "3.2",
-        "magType": "mb", "type": "earthquake", "place": "near Tokyo, Japan",
-    })
+    row.update(
+        {
+            "id": "us001",
+            "time": "2024-03-05T10:00:00.000Z",
+            "updated": "2024-03-05T10:05:00.000Z",
+            "latitude": "35.6",
+            "longitude": "139.7",
+            "depth": "10",
+            "mag": "3.2",
+            "magType": "mb",
+            "type": "earthquake",
+            "place": "near Tokyo, Japan",
+        }
+    )
     row.update(kw)
     return row
 
@@ -62,25 +71,35 @@ def test_keeps_newest_revision(tmp_path):
 
 
 def test_bad_rows_dropped_and_reported(tmp_path):
-    write_raw(tmp_path, "20261001T000000Z", [
-        raw_row(id="ok1"),
-        raw_row(id="nomag", mag=""),
-        raw_row(id="badlat", latitude="123"),
-        raw_row(id="notime", time=""),
-        raw_row(id="garbage", mag="abc"),  # unparseable -> null -> missing magnitude
-    ])
+    write_raw(
+        tmp_path,
+        "20261001T000000Z",
+        [
+            raw_row(id="ok1"),
+            raw_row(id="nomag", mag=""),
+            raw_row(id="badlat", latitude="123"),
+            raw_row(id="notime", time=""),
+            raw_row(id="garbage", mag="abc"),  # unparseable -> null -> missing magnitude
+        ],
+    )
     summary = clean.build(tmp_path)
     assert list(read_clean(tmp_path)["event_id"]) == ["ok1"]
     assert summary["dropped"] == {
-        "missing event_time": 1, "missing magnitude": 2, "latitude out of range": 1,
+        "missing event_time": 1,
+        "missing magnitude": 2,
+        "latitude out of range": 1,
     }
 
 
 def test_partitioned_by_year(tmp_path):
-    write_raw(tmp_path, "20261001T000000Z", [
-        raw_row(id="a", time="1923-09-01T02:58:00.000Z", updated="2020-01-01T00:00:00.000Z"),
-        raw_row(id="b", time="2011-03-11T05:46:00.000Z", updated="2020-01-01T00:00:00.000Z"),
-    ])
+    write_raw(
+        tmp_path,
+        "20261001T000000Z",
+        [
+            raw_row(id="a", time="1923-09-01T02:58:00.000Z", updated="2020-01-01T00:00:00.000Z"),
+            raw_row(id="b", time="2011-03-11T05:46:00.000Z", updated="2020-01-01T00:00:00.000Z"),
+        ],
+    )
     clean.build(tmp_path)
     out = tmp_path / "clean" / "usgs"
     assert sorted(p.name for p in out.iterdir()) == ["year=1923", "year=2011"]

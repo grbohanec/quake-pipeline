@@ -1,7 +1,10 @@
 [project]
 name = "quake-pipeline"
 version = "0.1.0"
-description = "Earthquake data pipeline: USGS/JMA ingestion, lakehouse storage, and severity modeling"
+description = "Earthquake data pipeline: USGS ingestion into an S3 data lake, queryable with Athena"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Gabriel Bohanec" }]
 requires-python = ">=3.10"
 dependencies = [
     "pandas>=2.0",
@@ -11,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
 quake-ingest-usgs = "quake_pipeline.ingest.usgs:main"
@@ -27,3 +30,10 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
