@@ -1,100 +1,154 @@
 # quake-pipeline
 
-An earthquake data pipeline that pulls live data from the USGS (and soon JMA), stores it in layered Parquet files, and feeds a severity-prediction model.
+[![CI](https://github.com/grbohanec/quake-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/grbohanec/quake-pipeline/actions/workflows/ci.yml)
+[![Daily refresh](https://github.com/grbohanec/quake-pipeline/actions/workflows/daily-refresh.yml/badge.svg)](https://github.com/grbohanec/quake-pipeline/actions/workflows/daily-refresh.yml)
 
-This is the rebuilt version of my [Earthquake Severity Prediction Project](https://github.com/grbohanec/Earthquake-Severity-Prediction-Project) (v1). That was a one-time Spark notebook run on 51 hand-downloaded CSVs; this one ingests data automatically and keeps itself up to date.
+An automated data pipeline that pulls every M2.0+ earthquake since 1880 from the [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/) (about 1.55 million events), cleans it into partitioned Parquet on S3, and refreshes itself every morning. The full history is queryable with SQL in Amazon Athena, for a few cents a month.
 
-## Status
+This is the rebuilt version of my [Earthquake Severity Prediction Project](https://github.com/grbohanec/Earthquake-Severity-Prediction-Project). That was a one-time Spark notebook on 51 hand-downloaded CSVs that stopped at June 2024; this one ingests automatically and stays current.
 
-- [x] **USGS ingestion**: backfill and incremental pulls, M2.0+
-- [x] **Cleaned layer**: typed, de-duplicated, validated, partitioned by year
-- [x] **Daily refresh**: GitHub Actions pulls new quakes every morning and syncs to S3 (needs AWS setup, see below)
-- [ ] Data quality checks
-- [ ] JMA ingestion (small quakes in Japan)
-- [ ] Model rebuild
-- [ ] Dashboard
+## Architecture
 
-## Setup
+```mermaid
+flowchart LR
+    usgs[USGS Event API] -->|new + revised events| ingest
 
-```bash
-python -m venv .venv
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+    subgraph gha [GitHub Actions, daily 06:17 JST]
+        ingest[Ingest<br/>Python] --> clean[Clean<br/>DuckDB]
+    end
+
+    subgraph s3 [S3 bucket]
+        raw[(data/raw)]
+        state[(data/state)]
+        cleaned[(data/clean)]
+    end
+
+    ingest <-->|sync| raw
+    ingest <-->|watermark| state
+    clean -->|upload| cleaned
+    cleaned --> athena[Athena SQL]
 ```
 
-## Ingesting USGS data
+1. **Ingest** asks USGS only for events added or revised since the last run, and saves them untouched to the raw layer.
+2. **Clean** rebuilds a typed, de-duplicated, validated dataset from raw, partitioned by year.
+3. **Athena** queries the clean Parquet files in place.
 
-**First run (backfill).** Pulls every M2.0+ earthquake in a date range. Start small to check it works:
+## Example
+
+Strongest earthquakes near Japan in the last 10 years:
+
+```sql
+SELECT event_time AT TIME ZONE 'Asia/Tokyo' AS time_jst, mag, depth_km, place
+FROM quakes.usgs_events
+WHERE year >= year(current_date) - 10
+  AND latitude BETWEEN 24 AND 46
+  AND longitude BETWEEN 122 AND 146
+ORDER BY mag DESC
+LIMIT 5;
+```
+
+A per-year count over the whole dataset scans about 1 MB, because Parquet lets Athena read only the columns a query uses. More queries are in [`sql/athena/example_queries.sql`](sql/athena/example_queries.sql).
+
+## Quickstart
+
+Requires Python 3.10 or newer.
+
+```bash
+git clone https://github.com/grbohanec/quake-pipeline
+cd quake-pipeline
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+pytest
+```
+
+Pull a month of data, then build the clean layer:
 
 ```bash
 quake-ingest-usgs --backfill --start 2026-09-01
+quake-clean
 ```
 
-Then the full history. It takes a while; if it's interrupted, run the same command again and it continues where it stopped:
+Data is written to `data/` (git-ignored).
 
-```bash
-quake-ingest-usgs --backfill --start 1880-01-01
-```
+## Usage
 
-**After that (incremental).** Pulls only events that are new or were revised since the last run:
+### Ingest
 
-```bash
-quake-ingest-usgs --incremental
-```
+| Command | What it does |
+| --- | --- |
+| `quake-ingest-usgs --backfill --start 1880-01-01` | Pulls every event in a date range. Safe to interrupt: re-running resumes where it stopped. |
+| `quake-ingest-usgs --incremental` | Pulls only events new or revised since the last run. |
 
-Options: `--min-mag` (default 2.0), `--lookback-days` (default 30), `--data-dir` (default `data/`), `--restart` (ignore saved backfill progress and start over).
+Options: `--min-mag` (default 2.0), `--lookback-days` (default 30), `--data-dir` (default `data/`), `--restart` (ignore saved backfill progress).
 
-### How it works
-
-- **The 20,000-event limit.** USGS returns at most 20,000 events per request. Before downloading, the script asks USGS how many events a date range holds and keeps halving the range until each piece fits. Long backfills are first cut into one-year chunks, and if USGS times out on a chunk, that chunk is split again.
-- **Raw layer.** Each piece is saved as-is to `data/raw/usgs/run_id=<timestamp>/`, with every column kept as text. Nothing is cleaned or dropped here, so the raw layer is always a faithful copy of what USGS sent.
-- **Incremental pulls.** USGS revises events after they happen (magnitudes get refined, locations corrected). The script tracks the latest `updated` timestamp it has seen in `data/state/usgs.json` and next time asks only for events updated after that. Revisions are resolved in the cleaned layer by keeping the newest version of each event `id`.
-- **Reliability.** Rate limits and server errors are retried with backoff, and progress is saved after every piece, so an interrupted backfill picks up from where it stopped instead of starting over.
-
-## Building the cleaned layer
+### Clean
 
 ```bash
 quake-clean
 ```
 
-Reads every raw file and writes one tidy dataset to `data/clean/usgs/year=YYYY/`:
+Reads every raw file and writes `data/clean/usgs/year=YYYY/`:
 
-- **Types.** Text becomes proper timestamps and numbers; blank values become nulls, not zeros.
-- **Clear column names.** `magType` becomes `mag_type`, `depth` becomes `depth_km`, and so on.
-- **One row per earthquake.** Overlapping downloads and USGS revisions are collapsed, keeping the newest version of each event.
-- **Sanity checks.** Rows missing a time, location or magnitude, or with impossible values, are dropped, and the run reports how many were dropped and why.
-- **Safe rebuilds.** The layer is built in a temporary folder and swapped in only when complete.
+- **Types:** text becomes timestamps and numbers; blanks become nulls, not zeros.
+- **One row per earthquake:** overlapping downloads and USGS revisions collapse to the newest version of each event.
+- **Validation:** rows missing a time, location or magnitude, or with impossible values, are dropped and counted.
+- **Safe rebuilds:** built in a temporary folder and swapped in only when complete.
 
-Built with DuckDB, which streams through the files rather than loading everything into memory. The original v1 dataset (1M rows) cleans in a few seconds.
+## How it works
 
-## Daily refresh (GitHub Actions + S3)
+- **The 20,000-event limit.** USGS returns at most 20,000 events per request. The ingester asks the `/count` endpoint first and halves date ranges until each piece fits. Long backfills start as one-year chunks, and timeouts trigger more splitting.
+- **Raw layer.** Each response is saved as-is under `data/raw/usgs/run_id=<timestamp>/`, every column kept as text, so cleaning can always be re-run from the original data.
+- **Incremental loads.** USGS revises events after they happen. The latest `updated` timestamp seen is stored in `data/state/usgs.json` as a watermark, and the next run asks only for events updated after it.
+- **Reliability.** Rate limits and server errors are retried with backoff. Progress is saved after every chunk and files are written atomically, so any run can be safely repeated.
 
-`.github/workflows/daily-refresh.yml` runs every day at 06:17 Tokyo time (and on demand from the Actions tab):
+## Deployment (AWS + GitHub Actions)
 
-1. Downloads `data/raw` and `data/state` from S3.
-2. Runs `quake-ingest-usgs --incremental` to pull new and revised events.
-3. Rebuilds the cleaned layer with `quake-clean`.
-4. Syncs raw, state and clean back to S3.
+[`daily-refresh.yml`](.github/workflows/daily-refresh.yml) runs every day at 06:17 Tokyo time, and on demand from the Actions tab. It downloads `data/raw` and `data/state` from S3, runs an incremental ingest, rebuilds the clean layer and syncs everything back.
 
-The bucket and region default to `gabe-quake-pipeline` and `us-east-2` (override them with repository variables `S3_BUCKET` and `AWS_REGION`). It needs one way to authenticate:
+**Authentication** uses one of:
 
-- **GitHub OIDC (preferred).** Set the variable `AWS_ROLE_ARN` to an IAM role that trusts GitHub's OIDC provider. GitHub issues a short-lived token, so no AWS keys are stored anywhere.
-- **Access key (fallback).** Set the secrets `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for an IAM user whose only permission is reading and writing `s3://<bucket>/data/*`. This project currently uses this, because its AWS account type blocks creating OIDC providers.
+- **GitHub OIDC (preferred):** set the repository variable `AWS_ROLE_ARN` to an IAM role that trusts GitHub's OIDC provider. No keys are stored.
+- **Access key (current setup):** secrets `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for an IAM user whose only permission is `s3://<bucket>/data/*`. This project uses it because its AWS account type blocks creating OIDC providers.
 
-## Tests
+The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override them with repository variables `S3_BUCKET` and `AWS_REGION`.
 
-```bash
-pytest
-```
+**Athena:** run [`sql/athena/create_tables.sql`](sql/athena/create_tables.sql) once. It uses partition projection, so new years appear automatically with no Glue crawler.
 
-The tests use a fake USGS API, so they run offline.
+## Design decisions
 
-## Layout
+| Decision | Why |
+| --- | --- |
+| DuckDB, not Spark | ~1.5M rows (~100 MB) clean in seconds on one machine; a cluster would take longer to start than the job takes to run. |
+| Raw + clean layers | Cleaning logic can change or be fixed and re-run without re-downloading 146 years of data. |
+| Full rebuild of the clean layer | Seconds at this size and always correct. At scale: Iceberg or Delta Lake with `MERGE`. |
+| Partition by year, not month | Early decades have few events; monthly folders would create thousands of tiny files. |
+| GitHub Actions, not Airflow | One daily job doesn't justify an orchestrator. |
+| Timestamps in UTC | Converted only for display, avoiding time-zone bugs. |
+
+## Project layout
 
 ```
 src/quake_pipeline/
-  ingest/usgs.py      USGS ingestion  (source -> raw)
-  transform/clean.py  cleaning        (raw -> clean)
-tests/                unit tests
-data/                 (git-ignored) raw/, clean/, state/
+  ingest/usgs.py          USGS API -> raw layer
+  transform/clean.py      raw layer -> clean layer
+tests/                    unit tests, mirroring src/ (offline, fake USGS API)
+sql/athena/               table definition and example queries
+.github/workflows/
+  ci.yml                  lint + tests on every push
+  daily-refresh.yml       scheduled pipeline run
 ```
+
+## Roadmap
+
+- [x] USGS ingestion: backfill and incremental, M2.0+
+- [x] Clean layer: typed, de-duplicated, validated, partitioned
+- [x] Daily refresh on GitHub Actions, stored in S3, queryable in Athena
+- [ ] Data quality checks and failure alerts
+- [ ] JMA source for small earthquakes in Japan
+- [ ] Severity model rebuilt on the clean layer
+- [ ] Dashboard
+
+## License
+
+[MIT](LICENSE)

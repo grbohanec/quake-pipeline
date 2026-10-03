@@ -70,9 +70,9 @@ CHECKS = [
 
 def _typed_select(raw_glob: str) -> str:
     casts = ",\n        ".join(
-        f'TRY_CAST(NULLIF(TRIM("{raw}"), \'\') AS {sql_type}) AS {clean}'
+        f"TRY_CAST(NULLIF(TRIM(\"{raw}\"), '') AS {sql_type}) AS {clean}"
         if sql_type != "VARCHAR"
-        else f'NULLIF(TRIM("{raw}"), \'\') AS {clean}'
+        else f"NULLIF(TRIM(\"{raw}\"), '') AS {clean}"
         for raw, (clean, sql_type) in COLUMNS.items()
     )
     return f"""

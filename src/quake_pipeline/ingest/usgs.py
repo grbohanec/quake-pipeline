@@ -22,10 +22,10 @@ import argparse
 import io
 import json
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterator
 
 import pandas as pd
 import requests
@@ -50,11 +50,11 @@ class Window:
     start: datetime
     end: datetime
 
-    def split(self) -> tuple["Window", "Window"]:
+    def split(self) -> tuple[Window, Window]:
         mid = self.start + (self.end - self.start) / 2
         return Window(self.start, mid), Window(mid, self.end)
 
-    def by_year(self) -> list["Window"]:
+    def by_year(self) -> list[Window]:
         """Cut into calendar-year pieces, so no single request covers decades of data."""
         pieces, start = [], self.start
         while start < self.end:
@@ -265,10 +265,17 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--start", default="1900-01-01", help="backfill start date (UTC)")
     p.add_argument("--end", default=None, help="backfill end date (UTC, default: now)")
     p.add_argument("--min-mag", type=float, default=DEFAULT_MIN_MAG)
-    p.add_argument("--lookback-days", type=int, default=DEFAULT_LOOKBACK_DAYS,
-                   help="incremental: how far back to look for revised events")
-    p.add_argument("--restart", action="store_true",
-                   help="backfill: ignore saved progress and pull the whole range again")
+    p.add_argument(
+        "--lookback-days",
+        type=int,
+        default=DEFAULT_LOOKBACK_DAYS,
+        help="incremental: how far back to look for revised events",
+    )
+    p.add_argument(
+        "--restart",
+        action="store_true",
+        help="backfill: ignore saved progress and pull the whole range again",
+    )
     p.add_argument("--data-dir", type=Path, default=Path("data"))
     args = p.parse_args(argv)
 

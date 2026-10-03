@@ -1,7 +1,6 @@
 """Tests for USGS ingestion, using a fake USGS API so nothing hits the network."""
 
 from datetime import datetime, timedelta, timezone
-from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
 import pytest
@@ -18,12 +17,14 @@ def make_events(n, start, step, mag="3.1", updated=None):
     events = []
     for i in range(n):
         t = start + i * step
-        events.append({
-            "time": t.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-            "id": f"us{i:07d}",
-            "mag": mag,
-            "updated": (updated or t).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-        })
+        events.append(
+            {
+                "time": t.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                "id": f"us{i:07d}",
+                "mag": mag,
+                "updated": (updated or t).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            }
+        )
     return events
 
 
@@ -92,8 +93,9 @@ def test_small_window_is_one_query(paths):
     out_dir, state_path = paths
     start = datetime(2024, 1, 1, tzinfo=UTC)
     fake = FakeUSGS(make_events(100, start, timedelta(hours=1)))
-    usgs.run(Window(start, start + timedelta(days=30)), 2.0, out_dir, state_path,
-             client=USGSClient(session=fake))
+    usgs.run(
+        Window(start, start + timedelta(days=30)), 2.0, out_dir, state_path, client=USGSClient(session=fake)
+    )
 
     assert [c[0] for c in fake.calls] == ["count", "query"]
     df = read_raw(out_dir)
@@ -106,8 +108,9 @@ def test_large_window_is_split_under_limit(paths):
     start = datetime(2020, 1, 1, tzinfo=UTC)
     # 50,000 events -> must be split into at least 3 queries
     fake = FakeUSGS(make_events(50_000, start, timedelta(minutes=10)))
-    usgs.run(Window(start, start + timedelta(days=400)), 2.0, out_dir, state_path,
-             client=USGSClient(session=fake))
+    usgs.run(
+        Window(start, start + timedelta(days=400)), 2.0, out_dir, state_path, client=USGSClient(session=fake)
+    )
 
     queries = [c for c in fake.calls if c[0] == "query"]
     assert len(queries) >= 3
@@ -119,11 +122,13 @@ def test_large_window_is_split_under_limit(paths):
 def test_min_magnitude_filter(paths):
     out_dir, state_path = paths
     start = datetime(2024, 1, 1, tzinfo=UTC)
-    events = make_events(10, start, timedelta(hours=1), mag="1.5") + \
-        [e | {"id": f"big{i}"} for i, e in enumerate(make_events(5, start, timedelta(hours=1), mag="2.4"))]
+    events = make_events(10, start, timedelta(hours=1), mag="1.5") + [
+        e | {"id": f"big{i}"} for i, e in enumerate(make_events(5, start, timedelta(hours=1), mag="2.4"))
+    ]
     fake = FakeUSGS(events)
-    usgs.run(Window(start, start + timedelta(days=1)), 2.0, out_dir, state_path,
-             client=USGSClient(session=fake))
+    usgs.run(
+        Window(start, start + timedelta(days=1)), 2.0, out_dir, state_path, client=USGSClient(session=fake)
+    )
     assert len(read_raw(out_dir)) == 5
 
 
@@ -138,12 +143,20 @@ def test_watermark_and_incremental(paths):
 
     # Later: one existing event gets revised, and 3 new ones arrive.
     revised = old[0] | {"mag": "3.5", "updated": "2024-01-03T00:00:00.000Z"}
-    new = [e | {"id": f"new{i}"} for i, e in
-           enumerate(make_events(3, start + timedelta(days=1), timedelta(hours=1)))]
+    new = [
+        e | {"id": f"new{i}"}
+        for i, e in enumerate(make_events(3, start + timedelta(days=1), timedelta(hours=1)))
+    ]
     fake.events = [revised] + old[1:] + new
 
-    state = usgs.run(Window(start, start + timedelta(days=2)), 2.0, out_dir, state_path,
-                     updated_after=usgs._parse_dt(state["max_updated"]), client=client)
+    state = usgs.run(
+        Window(start, start + timedelta(days=2)),
+        2.0,
+        out_dir,
+        state_path,
+        updated_after=usgs._parse_dt(state["max_updated"]),
+        client=client,
+    )
     assert state["last_run_events"] == 4  # only the revised + new events
     assert state["max_updated"] == "2024-01-03T00:00:00"
 
@@ -153,8 +166,9 @@ def test_query_always_sends_starttime_and_endtime(paths):
     out_dir, state_path = paths
     start = datetime(1990, 1, 1, tzinfo=UTC)
     fake = FakeUSGS(make_events(3, start, timedelta(days=1)))
-    usgs.run(Window(start, start + timedelta(days=5)), 2.0, out_dir, state_path,
-             client=USGSClient(session=fake))
+    usgs.run(
+        Window(start, start + timedelta(days=5)), 2.0, out_dir, state_path, client=USGSClient(session=fake)
+    )
     for _, params in fake.calls:
         assert "starttime" in params and "endtime" in params
 
@@ -217,8 +231,9 @@ def test_new_backfill_start_is_not_skipped(paths):
     out_dir, state_path = paths
     old = datetime(2000, 1, 1, tzinfo=UTC)
     recent = datetime(2024, 1, 1, tzinfo=UTC)
-    events = make_events(10, old, timedelta(days=1)) + \
-        [e | {"id": f"r{i}"} for i, e in enumerate(make_events(5, recent, timedelta(hours=1)))]
+    events = make_events(10, old, timedelta(days=1)) + [
+        e | {"id": f"r{i}"} for i, e in enumerate(make_events(5, recent, timedelta(hours=1)))
+    ]
     fake = FakeUSGS(events)
     end = recent + timedelta(days=1)
 
@@ -238,6 +253,7 @@ class TimesOutOnBigRanges(FakeUSGS):
         span = usgs._parse_dt(str(params["endtime"])) - usgs._parse_dt(str(params["starttime"]))
         if url.endswith("/count") and span > timedelta(days=self.max_days):
             import requests
+
             raise requests.exceptions.RetryError("too many 504 error responses")
         return super().get(url, params, timeout)
 
@@ -247,7 +263,7 @@ def test_long_backfill_is_cut_into_years():
     years = w.by_year()
     assert len(years) == 147
     assert years[0].start.year == 1880 and years[-1].end == w.end
-    assert all(a.end == b.start for a, b in zip(years, years[1:]))
+    assert all(a.end == b.start for a, b in zip(years, years[1:], strict=False))
 
 
 def test_server_timeout_splits_window(paths):
@@ -255,7 +271,8 @@ def test_server_timeout_splits_window(paths):
     start = datetime(2020, 1, 1, tzinfo=UTC)
     events = make_events(1000, start, timedelta(hours=6))
     fake = TimesOutOnBigRanges(events, max_days=100)  # even one year is "too big"
-    usgs.run(Window(start, start + timedelta(days=300)), 2.0, out_dir, state_path,
-             client=USGSClient(session=fake))
+    usgs.run(
+        Window(start, start + timedelta(days=300)), 2.0, out_dir, state_path, client=USGSClient(session=fake)
+    )
     df = read_raw(out_dir)
     assert len(df) == 1000 and df["id"].is_unique
