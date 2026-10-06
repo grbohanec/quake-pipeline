@@ -3,7 +3,7 @@
 [![CI](https://github.com/grbohanec/quake-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/grbohanec/quake-pipeline/actions/workflows/ci.yml)
 [![Daily refresh](https://github.com/grbohanec/quake-pipeline/actions/workflows/daily-refresh.yml/badge.svg)](https://github.com/grbohanec/quake-pipeline/actions/workflows/daily-refresh.yml)
 
-An automated data pipeline that pulls every M2.0+ earthquake since 1880 from the [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/) (about 1.55 million events), cleans it into partitioned Parquet on S3, and refreshes itself every morning. The full history is queryable with SQL in Amazon Athena, for a few cents a month.
+An automated data pipeline that pulls every M2.0+ earthquake since 1880 from the [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/) (about 1.55 million events), cleans it into partitioned Parquet on S3, and refreshes itself every morning. Each day's build must pass 14 data quality checks before it is published, so a bad run never reaches the queryable data. The full history is queryable with SQL in Amazon Athena, for a few cents a month.
 
 This is the rebuilt version of my [Earthquake Severity Prediction Project](https://github.com/grbohanec/Earthquake-Severity-Prediction-Project). That was a one-time Spark notebook on 51 hand-downloaded CSVs that stopped at June 2024; this one ingests automatically and stays current.
 
@@ -14,7 +14,7 @@ flowchart LR
     usgs[USGS Event API] -->|new + revised events| ingest
 
     subgraph gha [GitHub Actions, daily 06:17 JST]
-        ingest[Ingest<br/>Python] --> clean[Clean<br/>DuckDB]
+        ingest[Ingest<br/>Python] --> clean[Clean<br/>DuckDB] --> dq{Quality<br/>checks}
     end
 
     subgraph s3 [S3 bucket]
@@ -25,13 +25,17 @@ flowchart LR
 
     ingest <-->|sync| raw
     ingest <-->|watermark| state
-    clean -->|upload| cleaned
+    dq -->|pass: publish| cleaned
+    dq -.->|fail: alert, keep last good build| alert[Email / Slack]
+    dq -->|results| dqres[(data/dq)]
     cleaned --> athena[Athena SQL]
+    dqres --> athena
 ```
 
 1. **Ingest** asks USGS only for events added or revised since the last run, and saves them untouched to the raw layer.
 2. **Clean** rebuilds a typed, de-duplicated, validated dataset from raw, partitioned by year.
-3. **Athena** queries the clean Parquet files in place.
+3. **Quality checks** audit the new build. Only a build that passes is published; a failure stops the run and sends an alert.
+4. **Athena** queries the clean Parquet files in place, plus the history of every quality check.
 
 ## Example
 
@@ -67,6 +71,7 @@ Pull a month of data, then build the clean layer:
 ```bash
 quake-ingest-usgs --backfill --start 2026-09-01
 quake-clean
+quake-dq --freshness-hours 1e9   # skip the freshness check for an old sample
 ```
 
 Data is written to `data/` (git-ignored).
@@ -95,6 +100,28 @@ Reads every raw file and writes `data/clean/usgs/year=YYYY/`:
 - **Validation:** rows missing a time, location or magnitude, or with impossible values, are dropped and counted.
 - **Safe rebuilds:** built in a temporary folder and swapped in only when complete.
 
+### Data quality
+
+```bash
+quake-dq
+```
+
+Audits the clean layer and exits with code 1 if any error-level check fails, which stops the daily job before publishing. Results go to the log, the GitHub Actions run summary, and `data/dq/results/` as Parquet.
+
+| Check | Severity | Catches |
+| --- | --- | --- |
+| Schema matches (names and types) | error | USGS renaming a field; a type drifting in the cleaning SQL |
+| Not empty; `event_id` unique | error | a broken build; a bad de-duplication |
+| Required fields present | error | null time, location or magnitude |
+| Latitude, longitude, magnitude in range; year partition matches `event_time` | error | impossible values; rows in the wrong folder |
+| No events in the future | error | time-zone or parsing bugs |
+| Data is fresh (newest event < 48h old) | error | a stalled feed: M2.0+ quakes happen worldwide many times a day |
+| Row count did not drop > 1% vs. the last good run | error | data silently lost (the history only grows) |
+| Cleaning rejected < 1% of rows | error | an upstream change making most rows invalid |
+| Depth plausible; `updated_at` not before `event_time` | warn | odd but possible values, reported only |
+
+Thresholds are options: `--freshness-hours`, `--max-volume-drop`, `--max-drop-rate`. The last good run's row count is kept in `data/state/quality.json` and only moves forward when a run passes.
+
 ## How it works
 
 - **The 20,000-event limit.** USGS returns at most 20,000 events per request. The ingester asks the `/count` endpoint first and halves date ranges until each piece fits. Long backfills start as one-year chunks, and timeouts trigger more splitting.
@@ -104,7 +131,9 @@ Reads every raw file and writes `data/clean/usgs/year=YYYY/`:
 
 ## Deployment (AWS + GitHub Actions)
 
-[`daily-refresh.yml`](.github/workflows/daily-refresh.yml) runs every day at 06:17 Tokyo time, and on demand from the Actions tab. It downloads `data/raw` and `data/state` from S3, runs an incremental ingest, rebuilds the clean layer and syncs everything back.
+[`daily-refresh.yml`](.github/workflows/daily-refresh.yml) runs every day at 06:17 Tokyo time, and on demand from the Actions tab. It downloads `data/raw` and `data/state` from S3, runs an incremental ingest, rebuilds the clean layer, runs the quality checks, and publishes the clean layer to S3 only if they pass (write, audit, publish).
+
+**Alerts:** GitHub emails the workflow owner when a scheduled run fails. For a chat alert too, add a Slack or Discord incoming-webhook URL as the secret `ALERT_WEBHOOK_URL`; the message says whether the quality checks failed or the pipeline errored, and links to the run.
 
 **Authentication** uses one of:
 
@@ -113,7 +142,7 @@ Reads every raw file and writes `data/clean/usgs/year=YYYY/`:
 
 The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override them with repository variables `S3_BUCKET` and `AWS_REGION`.
 
-**Athena:** run [`sql/athena/create_tables.sql`](sql/athena/create_tables.sql) once. It uses partition projection, so new years appear automatically with no Glue crawler.
+**Athena:** run [`sql/athena/create_tables.sql`](sql/athena/create_tables.sql) once. It creates `quakes.usgs_events`, which uses partition projection so new years appear automatically with no Glue crawler, and `quakes.dq_results`, the history of quality checks.
 
 ## Design decisions
 
@@ -125,6 +154,10 @@ The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override
 | Partition by year, not month | Early decades have few events; monthly folders would create thousands of tiny files. |
 | GitHub Actions, not Airflow | One daily job doesn't justify an orchestrator. |
 | Timestamps in UTC | Converted only for display, avoiding time-zone bugs. |
+| Write, audit, publish | A bad build is caught before Athena sees it; readers keep the last good data instead of wrong data. |
+| Checks in plain SQL, not Great Expectations | 14 checks over one table fit in one readable file with no extra framework. Great Expectations or dbt tests would pay off with many tables. |
+| Error vs. warn severity | Only problems that make the data wrong block publishing; odd-but-possible values are reported, so alerts stay meaningful. |
+| Volume check against the last *good* run | Comparing with yesterday would let a slow leak of a few rows a day pass every check. |
 
 ## Project layout
 
@@ -132,11 +165,12 @@ The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override
 src/quake_pipeline/
   ingest/usgs.py          USGS API -> raw layer
   transform/clean.py      raw layer -> clean layer
+  quality/checks.py       quality checks that gate publishing
 tests/                    unit tests, mirroring src/ (offline, fake USGS API)
 sql/athena/               table definition and example queries
 .github/workflows/
   ci.yml                  lint + tests on every push
-  daily-refresh.yml       scheduled pipeline run
+  daily-refresh.yml       scheduled pipeline run (write -> audit -> publish)
 ```
 
 ## Roadmap
@@ -144,7 +178,7 @@ sql/athena/               table definition and example queries
 - [x] USGS ingestion: backfill and incremental, M2.0+
 - [x] Clean layer: typed, de-duplicated, validated, partitioned
 - [x] Daily refresh on GitHub Actions, stored in S3, queryable in Athena
-- [ ] Data quality checks and failure alerts
+- [x] Data quality checks and failure alerts
 - [ ] JMA source for small earthquakes in Japan
 - [ ] Severity model rebuilt on the clean layer
 - [ ] Dashboard

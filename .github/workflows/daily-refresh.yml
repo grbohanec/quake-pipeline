@@ -1,5 +1,6 @@
 # Daily refresh: pull new/revised earthquakes from USGS, rebuild the cleaned
-# layer, and sync everything back to S3.
+# layer, check its quality, and publish it to S3 only if the checks pass
+# (write -> audit -> publish).
 #
 # Repository settings (Settings > Secrets and variables > Actions):
 #   Optional variables S3_BUCKET / AWS_REGION override the defaults in `env` below.
@@ -70,16 +71,33 @@ jobs:
       - name: Ingest new and revised events
         run: quake-ingest-usgs --incremental
 
-      - name: Rebuild cleaned layer
+      - name: Rebuild cleaned layer (write)
+        # Built locally first. Athena keeps reading yesterday's S3 copy until
+        # this build has passed the quality checks below.
         run: quake-clean
 
-      - name: Upload results to S3
-        # Raw files are append-only. The cleaned layer is replaced wholesale,
-        # so --delete removes files that no longer exist in the new build.
+      - name: Upload raw data and state to S3
+        # Safe to save before the audit: raw is an exact copy of USGS, and the
+        # clean layer is rebuilt from it every run, so a failed build loses nothing.
         run: |
           aws s3 sync data/raw "$S3_DATA/raw" --only-show-errors
           aws s3 sync data/state "$S3_DATA/state" --only-show-errors
-          aws s3 sync data/clean "$S3_DATA/clean" --delete --only-show-errors
+
+      - name: Data quality checks (audit)
+        id: dq
+        run: quake-dq
+
+      - name: Publish cleaned layer to S3 (publish)
+        # Only reached when every error-level check passed. The layer is
+        # replaced wholesale, so --delete removes files that no longer exist.
+        run: aws s3 sync data/clean "$S3_DATA/clean" --delete --only-show-errors
+
+      - name: Upload quality results to S3
+        # Passed or failed, keep the record (queryable as quakes.dq_results).
+        if: always() && (steps.dq.outcome == 'success' || steps.dq.outcome == 'failure')
+        run: |
+          aws s3 sync data/dq "$S3_DATA/dq" --only-show-errors
+          aws s3 sync data/state "$S3_DATA/state" --only-show-errors
 
       - name: Summary
         run: |
@@ -90,3 +108,26 @@ jobs:
           print(f"- New or revised events this run: **{s.get('last_run_events', 0)}**")
           print(f"- Latest USGS update seen: `{s.get('max_updated')}`")
           EOF
+
+      - name: Alert on failure
+        # GitHub already emails the workflow owner when a scheduled run fails.
+        # Set secret ALERT_WEBHOOK_URL (a Slack or Discord incoming webhook) to
+        # also get a chat message.
+        if: failure()
+        env:
+          WEBHOOK: ${{ secrets.ALERT_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DQ_OUTCOME: ${{ steps.dq.outcome }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then echo "No ALERT_WEBHOOK_URL set; relying on GitHub's failure email."; exit 0; fi
+          if [ "$DQ_OUTCOME" = "failure" ]; then
+            reason="data quality checks failed, clean layer NOT published (Athena still serves the last good build)"
+          else
+            reason="the pipeline errored before publishing"
+          fi
+          REASON="$reason" python - <<'EOF' > payload.json
+          import json, os
+          msg = f":rotating_light: quake-pipeline daily refresh failed: {os.environ['REASON']}\n{os.environ['RUN_URL']}"
+          print(json.dumps({"text": msg, "content": msg}))  # Slack reads "text", Discord reads "content"
+          EOF
+          curl -fsS -X POST -H "Content-Type: application/json" --data @payload.json "$WEBHOOK"
