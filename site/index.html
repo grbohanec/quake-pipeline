@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Earthquakes, live</title>
+  <meta name="description" content="Every M2.0+ earthquake since 1880, refreshed daily from USGS by an automated data pipeline.">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="page">
+    <header class="top">
+      <div>
+        <h1>Earthquakes, live</h1>
+        <p>Every M2.0+ earthquake since 1880, refreshed daily from USGS.</p>
+      </div>
+      <div class="updated" id="updated">Loading…</div>
+    </header>
+
+    <section class="tiles" aria-label="Headline numbers">
+      <div class="tile"><div class="label">Last 24 hours</div><div class="value" id="kpi-24h">–</div><div class="note">earthquakes, M2.0+</div></div>
+      <div class="tile"><div class="label">Last 7 days</div><div class="value" id="kpi-7d">–</div><div class="note">earthquakes, M2.0+</div></div>
+      <div class="tile"><div class="label">Largest this month</div><div class="value" id="kpi-max">–</div><div class="note" id="kpi-max-note"></div></div>
+      <div class="tile"><div class="label">In the archive</div><div class="value" id="kpi-total">–</div><div class="note" id="kpi-total-note">earthquakes</div></div>
+    </section>
+
+    <section class="card" aria-labelledby="map-title">
+      <h2 id="map-title">Where the earth moved in the last 30 days</h2>
+      <p class="sub" id="map-sub">M2.5 and larger, on the boundaries between tectonic plates.</p>
+      <div id="world-map" role="img" aria-label="World map of recent earthquakes and tectonic plate boundaries"></div>
+      <div class="legend" aria-label="Map legend">
+        <span class="item"><span class="line thick" style="border-color: var(--plate-convergent)"></span>Subduction zone</span>
+        <span class="item"><span class="line" style="border-color: var(--plate-convergent)"></span>Other convergent</span>
+        <span class="item"><span class="line" style="border-color: var(--plate-divergent)"></span>Divergent</span>
+        <span class="item"><span class="line" style="border-color: var(--plate-transform)"></span>Transform</span>
+        <span class="sep"></span>
+        <span class="item" id="size-legend"></span>
+      </div>
+    </section>
+
+    <div class="row">
+      <section class="card" aria-labelledby="daily-title">
+        <h2 id="daily-title">Earthquakes per day</h2>
+        <p class="sub" id="daily-sub">M2.0 and larger, last 90 days (UTC days).</p>
+        <div class="chart" id="daily-chart"></div>
+        <details class="table-view">
+          <summary>Show as table</summary>
+          <div class="table-scroll"><table id="daily-table"><thead><tr><th>Day</th><th class="num">Earthquakes</th></tr></thead><tbody></tbody></table></div>
+        </details>
+      </section>
+
+      <section class="card" aria-labelledby="strong-title">
+        <h2 id="strong-title">Strongest this year</h2>
+        <p class="sub" id="strong-sub">The 10 largest earthquakes so far in <span id="strong-year"></span>.</p>
+        <div class="table-scroll">
+          <table class="ranked" id="strong-table">
+            <thead><tr><th class="num">Mag</th><th>Where</th><th>When (JST)</th><th class="num">Depth</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- Japan section: hidden until the JMA data source is added (see roadmap). -->
+    <section class="card japan" aria-labelledby="japan-title" hidden>
+      <h2 id="japan-title">Japan</h2>
+      <p class="sub" id="japan-sub">Four plates meet under Japan. Color shows depth: quakes get deeper as the Pacific and Philippine Sea plates dive under the islands.</p>
+      <div class="japan-grid">
+        <div>
+          <div id="japan-map" role="img" aria-label="Map of earthquakes around Japan in the last 30 days, coloured by depth"></div>
+          <div class="legend" id="depth-legend" aria-label="Depth legend"></div>
+        </div>
+        <div class="japan-side">
+          <div class="mini-stats">
+            <div><div class="label">Last 30 days</div><div class="value" id="jp-count">–</div><div class="note">earthquakes near Japan</div></div>
+            <div><div class="label">Largest</div><div class="value" id="jp-max">–</div><div class="note" id="jp-max-note"></div></div>
+          </div>
+          <h3>Recent M4+ near Japan</h3>
+          <div class="table-scroll">
+            <table class="ranked" id="japan-table">
+              <thead><tr><th>When (JST)</th><th class="num">Mag</th><th>Where</th><th class="num">Depth</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card health" aria-labelledby="health-title">
+      <h2 id="health-title">Pipeline health</h2>
+      <p class="sub">This page is rebuilt every morning at 06:17 JST. Each build has to pass automated data quality checks before it is published.</p>
+      <div class="health-grid">
+        <div>
+          <h3>Last 30 daily runs</h3>
+          <div class="runs" id="runs" role="list"></div>
+          <div class="legend status-legend">
+            <span class="item"><span class="status-icon good">✓</span>Passed</span>
+            <span class="item"><span class="status-icon warning">!</span>Passed with warnings</span>
+            <span class="item"><span class="status-icon critical">✕</span>Failed, not published</span>
+          </div>
+          <div class="mini-stats three">
+            <div><div class="label">Published</div><div class="value" id="h-published">–</div><div class="note">of the last 30 runs</div></div>
+            <div><div class="label">Freshness</div><div class="value" id="h-fresh">–</div><div class="note">newest event at last run</div></div>
+            <div><div class="label">Rows checked</div><div class="value" id="h-rows">–</div><div class="note">at last run</div></div>
+          </div>
+        </div>
+        <div>
+          <h3 id="checks-title">Checks in the latest run</h3>
+          <ul class="checks" id="checks"></ul>
+        </div>
+      </div>
+      <p class="health-links">
+        <a href="https://github.com/grbohanec/quake-pipeline/actions/workflows/daily-refresh.yml">Run history on GitHub Actions</a> ·
+        <a href="https://github.com/grbohanec/quake-pipeline#data-quality">How the checks work</a>
+      </p>
+    </section>
+
+    <footer class="credits">
+      Earthquake data: <a href="https://earthquake.usgs.gov/fdsnws/event/1/">USGS</a>.
+      Plate boundaries: P. Bird (2003), PB2002, via Ahlenius / Nordpil (ODC-BY).
+      Land: Natural Earth.
+      Built by <a href="https://github.com/grbohanec/quake-pipeline">quake-pipeline</a>.
+    </footer>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

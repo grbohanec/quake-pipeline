@@ -1,6 +1,7 @@
 # Daily refresh: pull new/revised earthquakes from USGS, rebuild the cleaned
 # layer, check its quality, and publish it to S3 only if the checks pass
-# (write -> audit -> publish).
+# (write -> audit -> publish). Then build the gold tables and redeploy the
+# dashboard on GitHub Pages.
 #
 # Repository settings (Settings > Secrets and variables > Actions):
 #   Optional variables S3_BUCKET / AWS_REGION override the defaults in `env` below.
@@ -66,6 +67,7 @@ jobs:
         run: |
           aws s3 sync "$S3_DATA/raw" data/raw --only-show-errors
           aws s3 sync "$S3_DATA/state" data/state --only-show-errors
+          aws s3 sync "$S3_DATA/dq" data/dq --only-show-errors  # check history, for the dashboard
           test -f data/state/usgs.json || { echo "No state file in S3 -- run a backfill first"; exit 1; }
 
       - name: Ingest new and revised events
@@ -91,6 +93,19 @@ jobs:
         # Only reached when every error-level check passed. The layer is
         # replaced wholesale, so --delete removes files that no longer exist.
         run: aws s3 sync data/clean "$S3_DATA/clean" --delete --only-show-errors
+
+      - name: Build gold layer and dashboard
+        # Small summary tables from the published clean layer: Parquet for Athena,
+        # JSON for the static dashboard page.
+        run: |
+          mkdir -p _site
+          cp -r site/. _site/
+          quake-gold --site-dir _site/data
+          aws s3 sync data/gold "$S3_DATA/gold" --delete --only-show-errors
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
 
       - name: Upload quality results to S3
         # Passed or failed, keep the record (queryable as quakes.dq_results).
@@ -131,3 +146,18 @@ jobs:
           print(json.dumps({"text": msg, "content": msg}))  # Slack reads "text", Discord reads "content"
           EOF
           curl -fsS -X POST -H "Content-Type: application/json" --data @payload.json "$WEBHOOK"
+
+  # Publishes the dashboard to GitHub Pages. Only runs when the refresh (and so
+  # the quality checks) passed, so the page never shows a bad build.
+  deploy-dashboard:
+    needs: refresh
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
