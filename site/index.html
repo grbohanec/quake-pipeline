@@ -62,7 +62,8 @@
       </section>
     </div>
 
-    <section class="card japan" aria-labelledby="japan-title">
+    <!-- Japan section: hidden until the JMA data source is added (see roadmap). -->
+    <section class="card japan" aria-labelledby="japan-title" hidden>
       <h2 id="japan-title">Japan</h2>
       <p class="sub" id="japan-sub">Four plates meet under Japan. Color shows depth: quakes get deeper as the Pacific and Philippine Sea plates dive under the islands.</p>
       <div class="japan-grid">
@@ -84,6 +85,35 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <section class="card health" aria-labelledby="health-title">
+      <h2 id="health-title">Pipeline health</h2>
+      <p class="sub">This page is rebuilt every morning at 06:17 JST. Each build has to pass automated data quality checks before it is published.</p>
+      <div class="health-grid">
+        <div>
+          <h3>Last 30 daily runs</h3>
+          <div class="runs" id="runs" role="list"></div>
+          <div class="legend status-legend">
+            <span class="item"><span class="status-icon good">✓</span>Passed</span>
+            <span class="item"><span class="status-icon warning">!</span>Passed with warnings</span>
+            <span class="item"><span class="status-icon critical">✕</span>Failed, not published</span>
+          </div>
+          <div class="mini-stats three">
+            <div><div class="label">Published</div><div class="value" id="h-published">–</div><div class="note">of the last 30 runs</div></div>
+            <div><div class="label">Freshness</div><div class="value" id="h-fresh">–</div><div class="note">newest event at last run</div></div>
+            <div><div class="label">Rows checked</div><div class="value" id="h-rows">–</div><div class="note">at last run</div></div>
+          </div>
+        </div>
+        <div>
+          <h3 id="checks-title">Checks in the latest run</h3>
+          <ul class="checks" id="checks"></ul>
+        </div>
+      </div>
+      <p class="health-links">
+        <a href="https://github.com/grbohanec/quake-pipeline/actions/workflows/daily-refresh.yml">Run history on GitHub Actions</a> ·
+        <a href="https://github.com/grbohanec/quake-pipeline#data-quality">How the checks work</a>
+      </p>
     </section>
 
     <footer class="credits">

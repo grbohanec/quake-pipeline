@@ -177,3 +177,37 @@ details.table-view .table-scroll { max-height: 240px; overflow-y: auto; margin-t
 .mini-stats .value { font-size: 26px; font-weight: 640; line-height: 1.2; }
 .mini-stats .note { color: var(--text-muted); font-size: 12px; }
 .japan-side h3 { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+
+/* Pipeline health */
+.health h3 { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
+.health-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 28px; }
+@media (max-width: 960px) { .health-grid { grid-template-columns: minmax(0, 1fr); } }
+.runs { display: grid; grid-template-columns: repeat(30, minmax(0, 1fr)); gap: 3px; position: relative; }
+@media (max-width: 700px) { .runs { grid-template-columns: repeat(15, minmax(0, 1fr)); } }
+.run { aspect-ratio: 1 / 1.6; border-radius: 4px; display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 11px; font-weight: 700; cursor: default; outline-offset: 2px; }
+.run.good { background: var(--good); }
+.run.warning { background: var(--warning); color: #0b0b0b; }
+.run.critical { background: var(--critical); }
+.run.missing { background: var(--grid); }
+.run:hover, .run:focus-visible { filter: brightness(1.12); }
+.status-legend { margin-top: 10px; }
+.status-icon { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 4px;
+  color: #fff; font-size: 10px; font-weight: 700; }
+.status-icon.good { background: var(--good); }
+.status-icon.warning { background: var(--warning); color: #0b0b0b; }
+.status-icon.critical { background: var(--critical); }
+.mini-stats.three { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 18px 0 0; }
+@media (max-width: 460px) { .mini-stats.three { grid-template-columns: 1fr 1fr; } }
+.checks { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+.checks li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  padding: 4px 0; border-bottom: 1px solid var(--grid); }
+.checks li:last-child { border-bottom: 0; }
+.checks .obs { color: var(--text-secondary); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+.health-links { margin: 16px 0 0; font-size: 13px; color: var(--text-muted); }
+.health-links a { color: var(--text-secondary); }
+.run-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 10px; font-size: 13px; line-height: 1.35; box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  transform: translate(-50%, -100%); margin-top: -8px; white-space: nowrap; }
+.run-tip strong { display: block; }
+.run-tip span { color: var(--text-secondary); }

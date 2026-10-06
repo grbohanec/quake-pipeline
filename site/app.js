@@ -322,6 +322,10 @@ function drawStrongest(table, year) {
   );
 }
 
+// The Japan section waits for the JMA data source, which records far more small
+// Japanese quakes than USGS. Flip this once data/japan_quakes.json comes from JMA.
+const SHOW_JAPAN = false;
+
 // Depth bands for the Japan map: shallow crustal / interface / intermediate slab / deep slab.
 const DEPTH_BANDS = [
   { max: 30, label: "0–30 km", token: "--depth-1" },
@@ -438,6 +442,84 @@ function drawJapanSide(quakes) {
   );
 }
 
+const STATUS = {
+  good: { icon: "✓", label: "Passed" },
+  warning: { icon: "!", label: "Passed with warnings" },
+  critical: { icon: "✕", label: "Failed, not published" },
+};
+const runStatus = (r) => (!r.published ? "critical" : r.warnings > 0 ? "warning" : "good");
+
+function drawHealth(runsTable, latest) {
+  const runs = rowsToObjects(runsTable).sort((a, b) => a.run_at - b.run_at).slice(-30);
+  const box = document.getElementById("runs");
+  const fmtRun = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const tip = document.createElement("div");
+  tip.className = "run-tip";
+  tip.hidden = true;
+  const tipHead = document.createElement("strong");
+  const tipBody = document.createElement("span");
+  tip.append(tipHead, tipBody);
+
+  const cells = [];
+  for (let i = runs.length; i < 30; i++) {
+    const empty = document.createElement("div");
+    empty.className = "run missing";
+    empty.setAttribute("aria-hidden", "true");
+    cells.push(empty);
+  }
+  for (const r of runs) {
+    const st = runStatus(r);
+    const cell = document.createElement("div");
+    cell.className = `run ${st}`;
+    cell.textContent = STATUS[st].icon;
+    cell.tabIndex = 0;
+    cell.setAttribute("role", "listitem");
+    const detail = r.failed_checks ? `${STATUS[st].label}: ${r.failed_checks}` : STATUS[st].label;
+    cell.setAttribute("aria-label", `${fmtRun.format(new Date(r.run_at))} JST. ${detail}`);
+    const show = () => {
+      tipHead.textContent = `${fmtRun.format(new Date(r.run_at))} JST`;
+      tipBody.textContent = detail;
+      tip.hidden = false;
+      const b = box.getBoundingClientRect(), c = cell.getBoundingClientRect();
+      tip.style.left = `${Math.max(90, Math.min(b.width - 90, c.left - b.left + c.width / 2))}px`;
+      tip.style.top = `${c.top - b.top}px`;
+    };
+    cell.addEventListener("pointerenter", show);
+    cell.addEventListener("focus", show);
+    cell.addEventListener("pointerleave", () => (tip.hidden = true));
+    cell.addEventListener("blur", () => (tip.hidden = true));
+    cells.push(cell);
+  }
+  box.replaceChildren(...cells, tip);
+
+  const last = runs[runs.length - 1];
+  setText("h-published", `${runs.filter((r) => r.published).length}/${runs.length}`);
+  setText("h-fresh", `${last.hours_since_newest_event < 10 ? last.hours_since_newest_event.toFixed(1) : Math.round(last.hours_since_newest_event)} h`);
+  setText("h-rows", fmtCount(last.row_count));
+
+  setText("checks-title", `Checks in the latest run (${fmtRun.format(new Date(latest.run_at))} JST)`);
+  const order = { critical: 0, warning: 1, good: 2 };
+  const items = latest.checks
+    .map((c) => ({ ...c, st: c.passed ? "good" : c.severity === "error" ? "critical" : "warning" }))
+    .sort((a, b) => order[a.st] - order[b.st]);
+  document.getElementById("checks").replaceChildren(
+    ...items.map((c) => {
+      const li = document.createElement("li");
+      const icon = document.createElement("span");
+      icon.className = `status-icon ${c.st}`;
+      icon.textContent = STATUS[c.st].icon;
+      icon.setAttribute("aria-label", c.passed ? "passed" : c.severity === "error" ? "failed" : "warning");
+      const name = document.createElement("span");
+      name.textContent = c.check;
+      const obs = document.createElement("span");
+      obs.className = "obs";
+      obs.textContent = c.observed;
+      li.append(icon, name, obs);
+      return li;
+    }),
+  );
+}
+
 async function main() {
   const [land, plates, recent, summary] = await Promise.all([
     getJSON("assets/land.geojson"),
@@ -449,10 +531,15 @@ async function main() {
   const [daily, strongest] = await Promise.all([getJSON("data/daily_counts.json"), getJSON("data/strongest_this_year.json")]);
   drawDailyChart(daily.rows);
   drawStrongest(strongest, strongest.year);
-  const japan = rowsToObjects(await getJSON("data/japan_quakes.json"));
-  drawDepthLegend();
-  drawJapanSide(japan);
-  buildJapanMap(land, plates, japan);
+  const [runs, latestChecks] = await Promise.all([getJSON("data/pipeline_runs.json"), getJSON("data/latest_checks.json")]);
+  drawHealth(runs, latestChecks);
+  if (SHOW_JAPAN) {
+    const japan = rowsToObjects(await getJSON("data/japan_quakes.json"));
+    document.querySelector(".card.japan").hidden = false;
+    drawDepthLegend();
+    drawJapanSide(japan);
+    buildJapanMap(land, plates, japan);
+  }
   const quakes = rowsToObjects(recent);
 
   const updated = document.getElementById("updated");
