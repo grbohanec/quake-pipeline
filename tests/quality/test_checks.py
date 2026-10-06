@@ -14,6 +14,7 @@ from quake_pipeline.transform import clean
 
 NOW = datetime(2024, 3, 6, 0, 0, tzinfo=timezone.utc)  # a day after the sample events
 LOOSE = checks.Thresholds()
+NO_FILE = Path("does-not-exist.csv")
 
 
 def raw_row(**kw):
@@ -121,7 +122,9 @@ def test_main_success_writes_history_and_baseline(tmp_path, monkeypatch):
     build(tmp_path, good_rows())
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-    rc = checks.main(["--data-dir", str(tmp_path), "--freshness-hours", "1e9"])
+    rc = checks.main(
+        ["--data-dir", str(tmp_path), "--freshness-hours", "1e9", "--known-issues", str(NO_FILE)]
+    )
     assert rc == 0
     assert json.loads((tmp_path / "state" / checks.BASELINE_FILE).read_text())["row_count"] == 3
     [hist] = (tmp_path / "dq" / "results").glob("dq_*.parquet")
@@ -135,7 +138,55 @@ def test_main_failure_exits_1_and_keeps_old_baseline(tmp_path, monkeypatch):
     build(tmp_path, good_rows())
     baseline = tmp_path / "state" / checks.BASELINE_FILE
     baseline.write_text(json.dumps({"row_count": 100}))
-    rc = checks.main(["--data-dir", str(tmp_path), "--freshness-hours", "1e9"])
+    rc = checks.main(
+        ["--data-dir", str(tmp_path), "--freshness-hours", "1e9", "--known-issues", str(NO_FILE)]
+    )
     assert rc == 1
     assert json.loads(baseline.read_text())["row_count"] == 100  # a bad run never moves the baseline
     assert list((tmp_path / "dq" / "results").glob("dq_*.parquet"))  # failures are recorded too
+
+
+def write_known(tmp_path, rows):
+    path = tmp_path / "known_issues.csv"
+    lines = ["check,event_id,reason,acknowledged_on"] + [f"{c},{e},{r},2026-10-06" for c, e, r in rows]
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def test_known_issue_is_skipped_but_new_ones_still_fire(tmp_path):
+    build(tmp_path, [*good_rows(), raw_row(id="odd1", depth="900"), raw_row(id="odd2", depth="950")])
+    known = checks.load_known_issues(write_known(tmp_path, [("depth plausible", "odd1", "reviewed")]))
+    r = by_name(checks.run_checks(tmp_path, NOW, LOOSE, known))["depth plausible"]
+    assert not r.passed and r.value == 1  # odd2 is new, so it still counts
+    assert "1 known, acknowledged" in r.observed
+
+
+def test_all_known_issues_acknowledged_passes(tmp_path):
+    build(tmp_path, [*good_rows(), raw_row(id="odd1", depth="900")])
+    known = checks.load_known_issues(write_known(tmp_path, [("depth plausible", "odd1", "reviewed")]))
+    results = by_name(checks.run_checks(tmp_path, NOW, LOOSE, known))
+    assert results["depth plausible"].passed
+    assert "known issues still apply" not in results
+
+
+def test_stale_known_issue_is_reported(tmp_path):
+    build(tmp_path, good_rows())
+    known = checks.load_known_issues(
+        write_known(tmp_path, [("depth plausible", "fixed_upstream", "reviewed")])
+    )
+    r = by_name(checks.run_checks(tmp_path, NOW, LOOSE, known))["known issues still apply"]
+    assert not r.passed and not r.blocking and "fixed_upstream" in r.observed
+
+
+def test_known_issues_file_rejects_typos(tmp_path):
+    with pytest.raises(ValueError, match="unknown check"):
+        checks.load_known_issues(write_known(tmp_path, [("depth plausibel", "x", "typo")]))
+    path = tmp_path / "no_reason.csv"
+    path.write_text("check,event_id,reason,acknowledged_on\ndepth plausible,x,,2026-10-06\n")
+    with pytest.raises(ValueError, match="reason are required"):
+        checks.load_known_issues(path)
+
+
+def test_repo_known_issues_file_is_valid():
+    path = Path(__file__).resolve().parents[2] / "quality" / "known_issues.csv"
+    assert checks.load_known_issues(path)  # parses and is not empty

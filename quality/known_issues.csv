@@ -1,0 +1,2 @@
+check,event_id,reason,acknowledged_on
+updated_at not before event_time,mb13717271,"Montana Bureau of Mines record: updated_at is ~3h before event_time at the source (USGS). Real M2.2 event, other fields valid.",2026-10-06
