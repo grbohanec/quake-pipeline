@@ -120,6 +120,8 @@ Audits the clean layer and exits with code 1 if any error-level check fails, whi
 | Cleaning rejected < 1% of rows | error | an upstream change making most rows invalid |
 | Depth plausible; `updated_at` not before `event_time` | warn | odd but possible values, reported only |
 
+**Known issues.** Some source records are odd but genuine, such as a USGS record whose `updated_at` is earlier than its `event_time`. After review, a record is listed in [`quality/known_issues.csv`](quality/known_issues.csv) with the reason and date, and the row-level checks skip it, so a warning means something *new*. If a listed record stops failing (fixed upstream), a `known issues still apply` warning says to remove it, so the list never goes stale. Changes to the list go through a pull request like any code change.
+
 Thresholds are options: `--freshness-hours`, `--max-volume-drop`, `--max-drop-rate`. The last good run's row count is kept in `data/state/quality.json` and only moves forward when a run passes.
 
 ## How it works
@@ -158,6 +160,7 @@ The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override
 | Checks in plain SQL, not Great Expectations | 14 checks over one table fit in one readable file with no extra framework. Great Expectations or dbt tests would pay off with many tables. |
 | Check history stored long, viewed wide | One row per check means adding a check never changes the table's schema; the `dq_runs` view pivots it to one row per run for reading. |
 | Error vs. warn severity | Only problems that make the data wrong block publishing; odd-but-possible values are reported, so alerts stay meaningful. |
+| Known issues acknowledged in a reviewed file | Silencing a check entirely would hide new problems; acknowledging specific records keeps the check sharp, and the file is an audit trail of every exception and why. |
 | Volume check against the last *good* run | Comparing with yesterday would let a slow leak of a few rows a day pass every check. |
 
 ## Project layout

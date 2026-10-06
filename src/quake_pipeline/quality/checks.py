@@ -9,6 +9,12 @@ The daily job follows a write-audit-publish pattern:
 So a bad build (an upstream schema change, a stalled feed, a bug in the cleaning
 SQL) fails the run loudly and Athena keeps serving yesterday's good data.
 
+Known issues: some source records are odd but correct to keep (e.g. a USGS record
+with an impossible timestamp). Once a person has reviewed one, it is listed in
+quality/known_issues.csv with a reason, and the row-level checks skip it, so the
+check only fires on *new* problems. A listed record that no longer fails is
+reported, so the list never silently goes stale.
+
 Each check has a severity:
 
 * error -- the build is wrong or untrustworthy; the run fails and nothing is published.
@@ -21,6 +27,7 @@ history of checks is queryable in Athena (table quakes.dq_results).
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import logging
 import os
@@ -56,6 +63,36 @@ EXPECTED_SCHEMA = {clean: _DUCKDB_TYPES.get(t, t) for clean, t in COLUMNS.values
 
 REQUIRED_COLUMNS = ["event_id", "event_time", "latitude", "longitude", "mag"]
 
+KNOWN_ISSUES_FILE = Path("quality/known_issues.csv")
+
+# Row-level checks: (name, severity, SQL condition that marks a row as BAD, expected).
+# Only these can have known issues acknowledged, because they are about single records.
+ROW_CHECKS = [
+    ("latitude in range", ERROR, "latitude NOT BETWEEN -90 AND 90", "-90..90"),
+    ("longitude in range", ERROR, "longitude NOT BETWEEN -180 AND 180", "-180..180"),
+    ("magnitude in range", ERROR, "mag NOT BETWEEN -2 AND 10", "-2..10"),
+    ("depth plausible", WARN, "depth_km NOT BETWEEN -10 AND 800", "-10..800 km"),
+    ("year partition matches event_time", ERROR, "year <> year(event_time)", "0 mismatches"),
+    ("updated_at not before event_time", WARN, "updated_at < event_time", "0 rows"),
+]
+
+
+def load_known_issues(path: Path | None) -> dict[str, set[str]]:
+    """Read acknowledged records: check name -> event ids. Fails fast on typos."""
+    if path is None or not path.exists():
+        return {}
+    valid = {name for name, *_ in ROW_CHECKS}
+    known: dict[str, set[str]] = {}
+    with path.open(newline="", encoding="utf-8") as f:
+        for line, row in enumerate(csv.DictReader(f), start=2):
+            check, event_id = (row.get("check") or "").strip(), (row.get("event_id") or "").strip()
+            if check not in valid:
+                raise ValueError(f"{path}:{line}: unknown check {check!r}; must be one of {sorted(valid)}")
+            if not event_id or not (row.get("reason") or "").strip():
+                raise ValueError(f"{path}:{line}: event_id and reason are required")
+            known.setdefault(check, set()).add(event_id)
+    return known
+
 
 @dataclass
 class CheckResult:
@@ -86,7 +123,10 @@ def _read_json(path: Path) -> dict | None:
     return json.loads(path.read_text()) if path.exists() else None
 
 
-def run_checks(data_dir: Path, now: datetime, t: Thresholds) -> list[CheckResult]:
+def run_checks(
+    data_dir: Path, now: datetime, t: Thresholds, known: dict[str, set[str]] | None = None
+) -> list[CheckResult]:
+    known = known or {}
     clean_dir = data_dir / "clean" / "usgs"
     if not any(clean_dir.glob("year=*/*.parquet")):
         return [CheckResult("clean layer exists", ERROR, False, "no Parquet files", f"files in {clean_dir}")]
@@ -127,16 +167,24 @@ def run_checks(data_dir: Path, now: datetime, t: Thresholds) -> list[CheckResult
     add("required fields present", ERROR, not null_report, null_report or "no nulls", "no nulls", sum(nulls))
 
     # --- Validity: values a real earthquake can have.
-    for check, severity, bad, expected in [
-        ("latitude in range", ERROR, "latitude NOT BETWEEN -90 AND 90", "-90..90"),
-        ("longitude in range", ERROR, "longitude NOT BETWEEN -180 AND 180", "-180..180"),
-        ("magnitude in range", ERROR, "mag NOT BETWEEN -2 AND 10", "-2..10"),
-        ("depth plausible", WARN, "depth_km NOT BETWEEN -10 AND 800", "-10..800 km"),
-        ("year partition matches event_time", ERROR, "year <> year(event_time)", "0 mismatches"),
-        ("updated_at not before event_time", WARN, "updated_at < event_time", "0 rows"),
-    ]:
-        n = _scalar(con, f"SELECT count(*) FROM q WHERE {bad}")
-        add(check, severity, n == 0, f"{n:,} rows", expected, n)
+    # Acknowledged records (known issues) are excluded, so only new problems count.
+    stale: list[str] = []
+    for check, severity, bad, expected in ROW_CHECKS:
+        failing = {r[0] for r in con.execute(f"SELECT event_id FROM q WHERE {bad}").fetchall()}
+        acked = known.get(check, set())
+        new = failing - acked
+        stale += [f"{e} ({check})" for e in sorted(acked - failing)]
+        note = f" ({len(failing & acked)} known, acknowledged)" if failing & acked else ""
+        add(check, severity, not new, f"{len(new):,} rows{note}", expected, len(new))
+    if stale:  # the record was fixed upstream or removed: drop it from known_issues.csv
+        add(
+            "known issues still apply",
+            WARN,
+            False,
+            f"no longer failing: {', '.join(stale)}",
+            "none stale",
+            len(stale),
+        )
 
     future_cutoff = now + timedelta(hours=1)  # small allowance for clock skew
     n_future = _scalar(
@@ -244,12 +292,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--freshness-hours", type=float, default=FRESHNESS_HOURS)
     p.add_argument("--max-volume-drop", type=float, default=MAX_VOLUME_DROP)
     p.add_argument("--max-drop-rate", type=float, default=MAX_DROP_RATE)
+    p.add_argument(
+        "--known-issues",
+        type=Path,
+        default=KNOWN_ISSUES_FILE,
+        help="CSV of acknowledged records (check, event_id, reason, acknowledged_on)",
+    )
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     now = datetime.now(timezone.utc)
     t = Thresholds(args.freshness_hours, args.max_volume_drop, args.max_drop_rate)
-    results = run_checks(args.data_dir, now, t)
+    known = load_known_issues(args.known_issues)
+    if known:
+        log.info("Known issues acknowledged: %d", sum(map(len, known.values())))
+    results = run_checks(args.data_dir, now, t, known)
 
     for r in results:
         status = "PASS" if r.passed else ("FAIL" if r.severity == ERROR else "WARN")
