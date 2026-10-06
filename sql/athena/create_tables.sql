@@ -56,3 +56,19 @@ CREATE EXTERNAL TABLE IF NOT EXISTS quakes.dq_results (
 )
 STORED AS PARQUET
 LOCATION 's3://gabe-quake-pipeline/data/dq/results/';
+
+-- One row per daily run, pivoted from dq_results for easy reading.
+-- dq_results stays in long format (one row per check) so new checks never
+-- change its schema; this view presents the same data wide.
+CREATE OR REPLACE VIEW quakes.dq_runs AS
+SELECT
+    run_id,
+    run_at,
+    bool_and(passed OR severity = 'warn')                    AS published,
+    count_if(NOT passed AND severity = 'error')              AS errors,
+    count_if(NOT passed AND severity = 'warn')               AS warnings,
+    max(CASE WHEN "check" = 'not empty'     THEN value END)  AS row_count,
+    max(CASE WHEN "check" = 'data is fresh' THEN value END)  AS hours_since_newest_event,
+    array_join(array_agg(CASE WHEN NOT passed THEN "check" END), ', ') AS failed_checks
+FROM quakes.dq_results
+GROUP BY run_id, run_at;

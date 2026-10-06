@@ -142,7 +142,7 @@ Thresholds are options: `--freshness-hours`, `--max-volume-drop`, `--max-drop-ra
 
 The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override them with repository variables `S3_BUCKET` and `AWS_REGION`.
 
-**Athena:** run [`sql/athena/create_tables.sql`](sql/athena/create_tables.sql) once. It creates `quakes.usgs_events`, which uses partition projection so new years appear automatically with no Glue crawler, and `quakes.dq_results`, the history of quality checks.
+**Athena:** run [`sql/athena/create_tables.sql`](sql/athena/create_tables.sql) once. It creates `quakes.usgs_events`, which uses partition projection so new years appear automatically with no Glue crawler, `quakes.dq_results`, the history of quality checks (one row per check per run), and the view `quakes.dq_runs`, which pivots that history to one row per run.
 
 ## Design decisions
 
@@ -156,6 +156,7 @@ The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override
 | Timestamps in UTC | Converted only for display, avoiding time-zone bugs. |
 | Write, audit, publish | A bad build is caught before Athena sees it; readers keep the last good data instead of wrong data. |
 | Checks in plain SQL, not Great Expectations | 14 checks over one table fit in one readable file with no extra framework. Great Expectations or dbt tests would pay off with many tables. |
+| Check history stored long, viewed wide | One row per check means adding a check never changes the table's schema; the `dq_runs` view pivots it to one row per run for reading. |
 | Error vs. warn severity | Only problems that make the data wrong block publishing; odd-but-possible values are reported, so alerts stay meaningful. |
 | Volume check against the last *good* run | Comparing with yesterday would let a slow leak of a few rows a day pass every check. |
 
