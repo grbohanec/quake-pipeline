@@ -41,3 +41,18 @@ TBLPROPERTIES (
     'projection.year.range'     = '1880,2100',
     'storage.location.template' = 's3://gabe-quake-pipeline/data/clean/usgs/year=${year}/'
 );
+
+-- History of data quality check results: one row per check per daily run,
+-- written by quake-dq whether the run passed or failed.
+CREATE EXTERNAL TABLE IF NOT EXISTS quakes.dq_results (
+    run_id    string,
+    run_at    timestamp,
+    `check`   string,
+    severity  string,   -- 'error' blocks publishing, 'warn' is report-only
+    passed    boolean,
+    observed  string,
+    expected  string,
+    value     double    -- the measured number (row count, hours since newest event, ...)
+)
+STORED AS PARQUET
+LOCATION 's3://gabe-quake-pipeline/data/dq/results/';

@@ -22,8 +22,10 @@ through the files instead of loading millions of rows into memory at once.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 import duckdb
@@ -66,6 +68,16 @@ CHECKS = [
     ("longitude out of range", "longitude NOT BETWEEN -180 AND 180"),
     ("magnitude out of range", "mag NOT BETWEEN -2 AND 10"),
 ]
+
+
+SUMMARY_FILE = "clean_summary.json"
+
+
+def _write_json(path: Path, obj: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(obj, indent=2))
+    tmp.replace(path)
 
 
 def _typed_select(raw_glob: str) -> str:
@@ -140,7 +152,10 @@ def build(data_dir: Path) -> dict:
         "duplicates_removed": raw_rows - unique_rows,
         "dropped": dropped,
         "clean_rows": clean_rows,
+        "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+    # Saved next to the ingest state so the quality checks can audit this build.
+    _write_json(data_dir / "state" / SUMMARY_FILE, summary)
     log.info("Raw rows:            %d", raw_rows)
     log.info("Duplicates removed:  %d", summary["duplicates_removed"])
     for reason, n in dropped.items():
