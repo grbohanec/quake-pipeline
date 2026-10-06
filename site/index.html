@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Earthquakes, live</title>
+  <meta name="description" content="Every M2.0+ earthquake since 1880, refreshed daily from USGS by an automated data pipeline.">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="page">
+    <header class="top">
+      <div>
+        <h1>Earthquakes, live</h1>
+        <p>Every M2.0+ earthquake since 1880, refreshed daily from USGS.</p>
+      </div>
+      <div class="updated" id="updated">Loading…</div>
+    </header>
+
+    <section class="card" aria-labelledby="map-title">
+      <h2 id="map-title">Where the earth moved in the last 30 days</h2>
+      <p class="sub" id="map-sub">M2.5 and larger, on the boundaries between tectonic plates.</p>
+      <div id="world-map" role="img" aria-label="World map of recent earthquakes and tectonic plate boundaries"></div>
+      <div class="legend" aria-label="Map legend">
+        <span class="item"><span class="line thick" style="border-color: var(--plate-convergent)"></span>Subduction zone</span>
+        <span class="item"><span class="line" style="border-color: var(--plate-convergent)"></span>Other convergent</span>
+        <span class="item"><span class="line" style="border-color: var(--plate-divergent)"></span>Divergent</span>
+        <span class="item"><span class="line" style="border-color: var(--plate-transform)"></span>Transform</span>
+        <span class="sep"></span>
+        <span class="item" id="size-legend"></span>
+      </div>
+    </section>
+
+    <footer class="credits">
+      Earthquake data: <a href="https://earthquake.usgs.gov/fdsnws/event/1/">USGS</a>.
+      Plate boundaries: P. Bird (2003), PB2002, via Ahlenius / Nordpil (ODC-BY).
+      Land: Natural Earth.
+      Built by <a href="https://github.com/grbohanec/quake-pipeline">quake-pipeline</a>.
+    </footer>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
