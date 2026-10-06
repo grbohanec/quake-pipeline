@@ -5,6 +5,8 @@ const PACIFIC_SPLIT = -30; // longitudes west of this are drawn east of 180, so 
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const shiftLon = (lon) => (lon < PACIFIC_SPLIT ? lon + 360 : lon);
+const HOME_LON = 152; // map centre: the western Pacific
+const COPIES = [-360, 0, 360]; // the world is drawn three times side by side, so panning never runs out of map
 
 // Radius in px from magnitude. Each magnitude step is ~32x more energy, so size
 // grows steadily with magnitude rather than with energy, which would hide small quakes.
@@ -29,10 +31,18 @@ function shiftFeature(f) {
   const points = g.type === "LineString" ? g.coordinates : g.coordinates.flat();
   const mean = points.reduce((s, p) => s + p[0], 0) / points.length;
   if (mean >= PACIFIC_SPLIT) return f;
-  const mv = (p) => [p[0] + 360, p[1]];
+  return offsetFeature(f, 360);
+}
+
+function offsetFeature(f, dx) {
+  if (!dx) return f;
+  const g = f.geometry;
+  const mv = (p) => [p[0] + dx, p[1]];
   const coordinates = g.type === "LineString" ? g.coordinates.map(mv) : g.coordinates.map((ring) => ring.map(mv));
   return { ...f, geometry: { ...g, coordinates } };
 }
+
+const tiled = (features) => COPIES.flatMap((dx) => features.map((f) => offsetFeature(f, dx)));
 
 function tooltipNode(q) {
   // Built with textContent: place names come from an external API.
@@ -77,33 +87,52 @@ function buildMap(land, plates, quakes) {
     zoom: 2,
     minZoom: 0,
     maxZoom: 7,
-    worldCopyJump: false,
-    maxBounds: [[-85, -60], [85, 360]],
     zoomSnap: 0,
     preferCanvas: true,
+    // Draw a full screen-width beyond each edge, so fast drags never reveal blank map
+    // before the next redraw (Leaflet's default is 10%).
+    renderer: L.canvas({ padding: 1 }),
+    worldCopyJump: true, // while dragging, Leaflet wraps the view by one world width
     attributionControl: false,
   });
   // Fit the full width of the world (Pacific-centred); let the poles crop top and bottom.
   const fitWidth = () => {
     const w = map.getSize().x;
     const zoom = Math.log2((w * 360) / 352 / 256);
-    map.setMinZoom(zoom);
-    map.setView([18, 152], zoom, { animate: false });
+    map.options.minZoom = zoom; // set directly: setMinZoom() would start a zoom animation
+    map.setView([18, HOME_LON], zoom, { animate: false });
   };
   fitWidth();
   window.addEventListener("resize", fitWidth);
 
-  const landLayer = L.geoJSON(land.features.map(shiftFeature), { interactive: false }).addTo(map);
-  const plateLayer = L.geoJSON(plates.features.map(shiftFeature), { interactive: false }).addTo(map);
+  const landLayer = L.geoJSON(tiled(land.features.map(shiftFeature)), { interactive: false }).addTo(map);
+  const plateLayer = L.geoJSON(tiled(plates.features.map(shiftFeature)), { interactive: false }).addTo(map);
 
   // Biggest first, so small quakes are drawn on top and stay hoverable.
   const sorted = [...quakes].sort((a, b) => b.mag - a.mag);
   const quakeLayer = L.layerGroup(
-    sorted.map((q) =>
-      L.circleMarker([q.lat, shiftLon(q.lon)], { radius: radius(q.mag), weight: 1, mag: q.mag })
-        .bindTooltip(() => tooltipNode(q), { direction: "top", offset: [0, -4] }),
+    COPIES.flatMap((dx) =>
+      sorted.map((q) =>
+        L.circleMarker([q.lat, shiftLon(q.lon) + dx], { radius: radius(q.mag), weight: 1, mag: q.mag })
+          .bindTooltip(() => tooltipNode(q), { direction: "top", offset: [0, -4] }),
+      ),
     ),
   ).addTo(map);
+
+  // Endless panning: worldCopyJump keeps the view within one world width while
+  // dragging, and the three identical copies make the wrap invisible. This handler
+  // covers the other ways to move (zoom, keyboard) and stops scrolling past the poles.
+  map.on("moveend", () => {
+    const c = map.getCenter();
+    const off = c.lng - HOME_LON;
+    const lng = Math.abs(off) > 180 ? c.lng - 360 * Math.round(off / 360) : c.lng;
+    const half = map.getSize().y / 2;
+    const top = map.project([84, 0]).y + half;
+    const bottom = map.project([-80, 0]).y - half;
+    const y = map.project(c).y;
+    const lat = top > bottom ? map.unproject([0, (top + bottom) / 2]).lat : map.unproject([0, Math.min(Math.max(y, top), bottom)]).lat;
+    if (lng !== c.lng || Math.abs(lat - c.lat) > 1e-6) map.setView([lat, lng], map.getZoom(), { animate: false });
+  });
 
   // Colours come from CSS tokens, so they follow light/dark mode.
   function applyTheme() {
