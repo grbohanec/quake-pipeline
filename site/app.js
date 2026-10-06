@@ -13,10 +13,10 @@ const COPIES = [-360, 0, 360]; // the world is drawn three times side by side, s
 const radius = (mag, scale = 1) => Math.max(1.5, 1.6 * (mag - 1.6) * scale);
 
 const fmtUTC = new Intl.DateTimeFormat("en-US", {
-  timeZone: "UTC", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  timeZone: "UTC", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
 });
 const fmtJST = new Intl.DateTimeFormat("en-US", {
-  timeZone: "Asia/Tokyo", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  timeZone: "Asia/Tokyo", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
 });
 
 async function getJSON(path) {
