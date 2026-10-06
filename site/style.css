@@ -13,6 +13,11 @@
   --plate-convergent: #eb6834;
   --plate-divergent: #2a78d6;
   --plate-transform: #1baf7a;
+  --depth-1: #86b6ef;
+  --depth-2: #3987e5;
+  --depth-3: #1c5cab;
+  --depth-4: #0d366b;
+  --plate-line: #6f6d68;
   --good: #0ca30c;
   --warning: #fab219;
   --critical: #d03b3b;
@@ -32,6 +37,11 @@
     --plate-convergent: #d95926;
     --plate-divergent: #3987e5;
     --plate-transform: #199e70;
+    --depth-1: #256abf;
+    --depth-2: #3987e5;
+    --depth-3: #6da7ec;
+    --depth-4: #b7d3f6;
+    --plate-line: #9a9890;
   }
 }
 :root[data-theme="dark"] {
@@ -48,6 +58,11 @@
   --plate-convergent: #d95926;
   --plate-divergent: #3987e5;
   --plate-transform: #199e70;
+  --depth-1: #256abf;
+  --depth-2: #3987e5;
+  --depth-3: #6da7ec;
+  --depth-4: #b7d3f6;
+  --plate-line: #9a9890;
 }
 
 * { box-sizing: border-box; }
@@ -148,3 +163,17 @@ tr:last-child td { border-bottom: 0; }
 details.table-view { margin-top: 10px; font-size: 13px; color: var(--text-secondary); }
 details.table-view summary { cursor: pointer; }
 details.table-view .table-scroll { max-height: 240px; overflow-y: auto; margin-top: 8px; }
+
+/* Japan */
+.japan-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 24px; }
+@media (max-width: 960px) { .japan-grid { grid-template-columns: minmax(0, 1fr); } }
+#japan-map { height: 520px; border-radius: 8px; background: var(--surface); }
+@media (max-width: 700px) { #japan-map { height: 420px; } }
+.plate-label { color: var(--text-muted); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; text-align: center; line-height: 1.2; }
+.legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+.mini-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+.mini-stats > div { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+.mini-stats .label { color: var(--text-secondary); font-size: 13px; }
+.mini-stats .value { font-size: 26px; font-weight: 640; line-height: 1.2; }
+.mini-stats .note { color: var(--text-muted); font-size: 12px; }
+.japan-side h3 { font-size: 14px; font-weight: 600; margin: 0 0 8px; }

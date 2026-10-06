@@ -322,6 +322,122 @@ function drawStrongest(table, year) {
   );
 }
 
+// Depth bands for the Japan map: shallow crustal / interface / intermediate slab / deep slab.
+const DEPTH_BANDS = [
+  { max: 30, label: "0–30 km", token: "--depth-1" },
+  { max: 70, label: "30–70 km", token: "--depth-2" },
+  { max: 300, label: "70–300 km", token: "--depth-3" },
+  { max: Infinity, label: "300+ km", token: "--depth-4" },
+];
+const depthBand = (d) => DEPTH_BANDS.find((b) => d < b.max);
+
+// Rough label positions for the plates that meet around Japan.
+const JAPAN_PLATES = [
+  { name: "Pacific\nPlate", at: [36.5, 147.2] },
+  { name: "Philippine Sea\nPlate", at: [27.2, 134.6] },
+  { name: "Okhotsk\nPlate", at: [46.3, 144.2] },
+  { name: "Amur\nPlate", at: [39.5, 132.5] },
+];
+
+function buildJapanMap(land, plates, quakes) {
+  const map = L.map("japan-map", {
+    preferCanvas: true,
+    attributionControl: false,
+    zoomSnap: 0.25,
+    minZoom: 4,
+    maxZoom: 9,
+    maxBounds: [[18, 112], [52, 160]],
+    maxBoundsViscosity: 1,
+  });
+  map.fitBounds([[24.5, 125], [47.5, 148]]);
+
+  const landLayer = L.geoJSON(land, { interactive: false }).addTo(map);
+  const plateLayer = L.geoJSON(plates, { interactive: false }).addTo(map);
+  for (const p of JAPAN_PLATES) {
+    L.marker(p.at, {
+      interactive: false,
+      icon: L.divIcon({ className: "plate-label", html: "", iconSize: [140, 32], iconAnchor: [70, 16] }),
+    })
+      .addTo(map)
+      .getElement().textContent = p.name.replace("\n", " ");
+  }
+
+  // Shallow last, so the many shallow quakes sit on top of the deeper ones.
+  const sorted = [...quakes].sort((a, b) => b.depth - a.depth);
+  const markers = sorted.map((q) =>
+    L.circleMarker([q.lat, q.lon], { radius: radius(q.mag, 1.15), weight: 1, depth: q.depth })
+      .bindTooltip(() => tooltipNode(q), { direction: "top", offset: [0, -4] })
+      .addTo(map),
+  );
+
+  function applyTheme() {
+    landLayer.setStyle({ weight: 0, fillColor: css("--land"), fillOpacity: 1 });
+    plateLayer.setStyle((f) => ({
+      color: css("--plate-line"),
+      weight: f.properties.type === "subduction" ? 2.5 : 1.2,
+      opacity: 0.8,
+      lineCap: "round",
+    }));
+    for (const m of markers) {
+      m.setStyle({ color: css("--surface"), fillColor: css(depthBand(m.options.depth).token), fillOpacity: 0.85, opacity: 0.9 });
+    }
+  }
+  applyTheme();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+}
+
+function drawDepthLegend() {
+  const box = document.getElementById("depth-legend");
+  const title = document.createElement("span");
+  title.textContent = "Depth";
+  box.append(title);
+  for (const b of DEPTH_BANDS) {
+    const item = document.createElement("span");
+    item.className = "item";
+    const sw = document.createElement("span");
+    sw.className = "swatch";
+    sw.style.background = `var(${b.token})`;
+    item.append(sw, document.createTextNode(b.label));
+    box.append(item);
+  }
+  const sep = document.createElement("span");
+  sep.className = "item";
+  const line = document.createElement("span");
+  line.className = "line thick";
+  line.style.borderColor = "var(--plate-line)";
+  sep.append(line, document.createTextNode("Subduction zone"));
+  box.append(sep);
+}
+
+function drawJapanSide(quakes) {
+  setText("jp-count", quakes.length.toLocaleString("en-US"));
+  if (quakes.length) {
+    const top = quakes.reduce((a, b) => (b.mag > a.mag ? b : a));
+    setText("jp-max", `M${top.mag.toFixed(1)}`);
+    setText("jp-max-note", top.place || "");
+  }
+  const fmtWhen = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const recent = quakes.filter((q) => q.mag >= 4).sort((a, b) => b.time - a.time).slice(0, 10);
+  const tbody = document.querySelector("#japan-table tbody");
+  tbody.replaceChildren(
+    ...recent.map((q) => {
+      const tr = document.createElement("tr");
+      for (const [cls, text] of [
+        ["when", fmtWhen.format(new Date(q.time))],
+        ["num mag", q.mag.toFixed(1)],
+        ["", q.place || "Unknown location"],
+        ["num depth", `${Math.round(q.depth)} km`],
+      ]) {
+        const td = document.createElement("td");
+        td.className = cls;
+        td.textContent = text;
+        tr.append(td);
+      }
+      return tr;
+    }),
+  );
+}
+
 async function main() {
   const [land, plates, recent, summary] = await Promise.all([
     getJSON("assets/land.geojson"),
@@ -333,6 +449,10 @@ async function main() {
   const [daily, strongest] = await Promise.all([getJSON("data/daily_counts.json"), getJSON("data/strongest_this_year.json")]);
   drawDailyChart(daily.rows);
   drawStrongest(strongest, strongest.year);
+  const japan = rowsToObjects(await getJSON("data/japan_quakes.json"));
+  drawDepthLegend();
+  drawJapanSide(japan);
+  buildJapanMap(land, plates, japan);
   const quakes = rowsToObjects(recent);
 
   const updated = document.getElementById("updated");
