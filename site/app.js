@@ -12,10 +12,10 @@ const COPIES = [-360, 0, 360]; // the world is drawn three times side by side, s
 // grows steadily with magnitude rather than with energy, which would hide small quakes.
 const radius = (mag, scale = 1) => Math.max(1.5, 1.6 * (mag - 1.6) * scale);
 
-const fmtUTC = new Intl.DateTimeFormat("en-GB", {
+const fmtUTC = new Intl.DateTimeFormat("en-US", {
   timeZone: "UTC", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
 });
-const fmtJST = new Intl.DateTimeFormat("en-GB", {
+const fmtJST = new Intl.DateTimeFormat("en-US", {
   timeZone: "Asia/Tokyo", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
 });
 
@@ -166,7 +166,7 @@ function buildMap(land, plates, quakes) {
 
 const fmtCount = (n) =>
   n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e4 ? `${(n / 1e3).toFixed(1)}K` : n.toLocaleString("en-US");
-const fmtDay = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Tokyo", month: "short", day: "numeric" });
+const fmtDay = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", month: "short", day: "numeric" });
 
 function setText(id, text) {
   document.getElementById(id).textContent = text;
@@ -185,6 +185,143 @@ function drawTiles(s) {
   setText("kpi-total-note", `earthquakes since ${s.archive_since}`);
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+const svgEl = (tag, attrs = {}, parent) => {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  if (parent) parent.append(el);
+  return el;
+};
+const fmtShortDay = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
+const fmtLongDay = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric", year: "numeric" });
+const fmtMonth = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short" });
+
+// Round tick step: 1, 2 or 5 times a power of ten.
+function niceStep(max, target = 4) {
+  const raw = max / target;
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  return [1, 2, 5, 10].map((m) => m * pow).find((s) => s >= raw);
+}
+
+function drawDailyChart(days) {
+  const box = document.getElementById("daily-chart");
+  const data = days.map(([day, n]) => ({ date: new Date(`${day}T00:00:00Z`), n }));
+
+  // Table view: every value is reachable without hovering.
+  const tbody = document.querySelector("#daily-table tbody");
+  tbody.replaceChildren(
+    ...[...data].reverse().map((d) => {
+      const tr = document.createElement("tr");
+      const a = document.createElement("td");
+      a.textContent = fmtLongDay.format(d.date);
+      const b = document.createElement("td");
+      b.className = "num";
+      b.textContent = d.n.toLocaleString("en-US");
+      tr.append(a, b);
+      return tr;
+    }),
+  );
+
+  function render() {
+    box.replaceChildren();
+    const W = box.clientWidth, H = box.clientHeight;
+    const m = { top: 22, right: 12, bottom: 24, left: 44 };
+    const w = W - m.left - m.right, h = H - m.top - m.bottom;
+    const maxN = Math.max(...data.map((d) => d.n));
+    const step = niceStep(maxN);
+    const yMax = Math.ceil(maxN / step) * step;
+    const x = (i) => m.left + (data.length === 1 ? w / 2 : (i / (data.length - 1)) * w);
+    const y = (n) => m.top + h - (n / yMax) * h;
+
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Line chart of earthquakes per day" }, box);
+    const grid = svgEl("g", { class: "grid" }, svg);
+    const axis = svgEl("g", { class: "axis" }, svg);
+    for (let v = step; v <= yMax; v += step) {
+      svgEl("line", { x1: m.left, x2: m.left + w, y1: y(v), y2: y(v) }, grid);
+    }
+    for (let v = 0; v <= yMax; v += step) {
+      const t = svgEl("text", { x: m.left - 8, y: y(v) + 4, "text-anchor": "end" }, axis);
+      t.textContent = v.toLocaleString("en-US");
+    }
+    data.forEach((d, i) => {
+      if (d.date.getUTCDate() !== 1) return; // label the first day of each month
+      const t = svgEl("text", { x: x(i), y: H - 4, "text-anchor": "middle" }, axis);
+      t.textContent = fmtMonth.format(d.date);
+    });
+    svgEl("line", { class: "baseline", x1: m.left, x2: m.left + w, y1: y(0), y2: y(0) }, svg);
+
+    const pts = data.map((d, i) => `${x(i).toFixed(1)},${y(d.n).toFixed(1)}`);
+    svgEl("path", { class: "area", d: `M${x(0)},${y(0)}L${pts.join("L")}L${x(data.length - 1)},${y(0)}Z` }, svg);
+    svgEl("path", { class: "line", d: `M${pts.join("L")}` }, svg);
+
+    // Label only the busiest day: usually an aftershock sequence worth noticing.
+    const pi = data.reduce((best, d, i) => (d.n > data[best].n ? i : best), 0);
+    svgEl("circle", { class: "peak-dot", cx: x(pi), cy: y(data[pi].n), r: 4 }, svg);
+    const pl = svgEl("text", { class: "peak-label", x: x(pi), y: y(data[pi].n) - 10, "text-anchor": x(pi) > m.left + w - 60 ? "end" : x(pi) < m.left + 60 ? "start" : "middle" }, svg);
+    pl.textContent = `${data[pi].n.toLocaleString("en-US")} on ${fmtShortDay.format(data[pi].date)}`;
+
+    // Crosshair + tooltip: snaps to the nearest day.
+    const cross = svgEl("line", { class: "cross", y1: m.top, y2: m.top + h, visibility: "hidden" }, svg);
+    const dot = svgEl("circle", { class: "hover-dot", r: 4, visibility: "hidden" }, svg);
+    const tip = document.createElement("div");
+    tip.className = "chart-tip";
+    tip.hidden = true;
+    const tipVal = document.createElement("strong");
+    const tipDay = document.createElement("span");
+    tip.append(tipVal, tipDay);
+    box.append(tip);
+    const hit = svgEl("rect", { x: m.left, y: 0, width: w, height: H, fill: "transparent" }, svg);
+    hit.addEventListener("pointermove", (e) => {
+      const r = svg.getBoundingClientRect();
+      const px = ((e.clientX - r.left) / r.width) * W;
+      const i = Math.max(0, Math.min(data.length - 1, Math.round(((px - m.left) / w) * (data.length - 1))));
+      const d = data[i];
+      cross.setAttribute("x1", x(i));
+      cross.setAttribute("x2", x(i));
+      dot.setAttribute("cx", x(i));
+      dot.setAttribute("cy", y(d.n));
+      cross.setAttribute("visibility", "visible");
+      dot.setAttribute("visibility", "visible");
+      tipVal.textContent = `${d.n.toLocaleString("en-US")} earthquakes`;
+      tipDay.textContent = fmtLongDay.format(d.date);
+      tip.hidden = false;
+      tip.style.left = `${Math.max(80, Math.min(W - 80, x(i)))}px`;
+      tip.style.top = `${y(d.n)}px`;
+    });
+    hit.addEventListener("pointerleave", () => {
+      cross.setAttribute("visibility", "hidden");
+      dot.setAttribute("visibility", "hidden");
+      tip.hidden = true;
+    });
+  }
+  render();
+  new ResizeObserver(render).observe(box);
+}
+
+function drawStrongest(table, year) {
+  setText("strong-year", String(year));
+  const fmtWhen = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const tbody = document.querySelector("#strong-table tbody");
+  tbody.replaceChildren(
+    ...rowsToObjects(table).map((q) => {
+      const tr = document.createElement("tr");
+      const cells = [
+        ["num mag", q.mag.toFixed(1)],
+        ["", q.place || "Unknown location"],
+        ["when", fmtWhen.format(new Date(q.time))],
+        ["num depth", `${Math.round(q.depth)} km`],
+      ];
+      for (const [cls, text] of cells) {
+        const td = document.createElement("td");
+        td.className = cls;
+        td.textContent = text;
+        tr.append(td);
+      }
+      return tr;
+    }),
+  );
+}
+
 async function main() {
   const [land, plates, recent, summary] = await Promise.all([
     getJSON("assets/land.geojson"),
@@ -193,6 +330,9 @@ async function main() {
     getJSON("data/summary.json"),
   ]);
   drawTiles(summary);
+  const [daily, strongest] = await Promise.all([getJSON("data/daily_counts.json"), getJSON("data/strongest_this_year.json")]);
+  drawDailyChart(daily.rows);
+  drawStrongest(strongest, strongest.year);
   const quakes = rowsToObjects(recent);
 
   const updated = document.getElementById("updated");

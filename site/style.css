@@ -108,3 +108,43 @@ footer.credits a { color: var(--text-secondary); }
 .tile .value { font-size: 32px; line-height: 1.15; font-weight: 640; margin: 4px 0 2px; letter-spacing: -0.01em; }
 .tile .note { color: var(--text-muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 460px) { .tile .value { font-size: 26px; } .tile .note { white-space: normal; } }
+
+/* Row of two cards */
+.row { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; }
+@media (max-width: 960px) { .row { grid-template-columns: minmax(0, 1fr); } }
+.row .card { margin-bottom: 20px; display: flex; flex-direction: column; }
+.row .card .chart { flex: 1; min-height: 260px; }
+
+/* Line chart */
+.chart { position: relative; height: 260px; }
+.chart svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.chart .grid line { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; }
+.chart .axis text { fill: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.chart .baseline { stroke: var(--text-muted); stroke-opacity: 0.5; stroke-width: 1; shape-rendering: crispEdges; }
+.chart .area { fill: var(--plate-divergent); opacity: 0.1; }
+.chart .line { fill: none; stroke: var(--plate-divergent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .peak-dot { fill: var(--plate-divergent); stroke: var(--surface); stroke-width: 2; }
+.chart .peak-label { fill: var(--text-secondary); font-size: 12px; }
+.chart .cross { stroke: var(--text-muted); stroke-width: 1; shape-rendering: crispEdges; }
+.chart .hover-dot { fill: var(--plate-divergent); stroke: var(--surface); stroke-width: 2; }
+.chart-tip {
+  position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 10px; font-size: 13px; line-height: 1.35; white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); transform: translate(-50%, -100%); margin-top: -10px;
+}
+.chart-tip strong { display: block; font-size: 15px; color: var(--text-primary); }
+.chart-tip span { color: var(--text-secondary); }
+
+/* Tables */
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; font-weight: 560; color: var(--text-secondary); font-size: 12px; padding: 0 10px 8px 0; border-bottom: 1px solid var(--grid); }
+td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--grid); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ranked td.mag { font-weight: 640; }
+.ranked td.when { color: var(--text-secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ranked td.depth { color: var(--text-secondary); }
+details.table-view { margin-top: 10px; font-size: 13px; color: var(--text-secondary); }
+details.table-view summary { cursor: pointer; }
+details.table-view .table-scroll { max-height: 240px; overflow-y: auto; margin-top: 8px; }

@@ -39,6 +39,29 @@
       </div>
     </section>
 
+    <div class="row">
+      <section class="card" aria-labelledby="daily-title">
+        <h2 id="daily-title">Earthquakes per day</h2>
+        <p class="sub" id="daily-sub">M2.0 and larger, last 90 days (UTC days).</p>
+        <div class="chart" id="daily-chart"></div>
+        <details class="table-view">
+          <summary>Show as table</summary>
+          <div class="table-scroll"><table id="daily-table"><thead><tr><th>Day</th><th class="num">Earthquakes</th></tr></thead><tbody></tbody></table></div>
+        </details>
+      </section>
+
+      <section class="card" aria-labelledby="strong-title">
+        <h2 id="strong-title">Strongest this year</h2>
+        <p class="sub" id="strong-sub">The 10 largest earthquakes so far in <span id="strong-year"></span>.</p>
+        <div class="table-scroll">
+          <table class="ranked" id="strong-table">
+            <thead><tr><th class="num">Mag</th><th>Where</th><th>When (JST)</th><th class="num">Depth</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
     <footer class="credits">
       Earthquake data: <a href="https://earthquake.usgs.gov/fdsnws/event/1/">USGS</a>.
       Plate boundaries: P. Bird (2003), PB2002, via Ahlenius / Nordpil (ODC-BY).
