@@ -200,7 +200,7 @@ details.table-view .table-scroll { max-height: 240px; overflow-y: auto; margin-t
 .mini-stats.three { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 18px 0 0; }
 @media (max-width: 460px) { .mini-stats.three { grid-template-columns: 1fr 1fr; } }
 .checks { list-style: none; margin: 0; padding: 0; font-size: 14px; }
-.checks li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+.checks li { display: grid; grid-template-columns: 16px minmax(11em, 1fr) minmax(0, 1.3fr); gap: 10px; align-items: center;
   padding: 4px 0; border-bottom: 1px solid var(--grid); }
 .checks li:last-child { border-bottom: 0; }
 .checks .obs { color: var(--text-secondary); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
@@ -211,3 +211,4 @@ details.table-view .table-scroll { max-height: 240px; overflow-y: auto; margin-t
   transform: translate(-50%, -100%); margin-top: -8px; white-space: nowrap; }
 .run-tip strong { display: block; }
 .run-tip span { color: var(--text-secondary); }
+.run.missing:hover { filter: none; }

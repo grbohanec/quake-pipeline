@@ -20,6 +20,7 @@ dev = ["pytest>=8", "ruff>=0.6"]
 quake-ingest-usgs = "quake_pipeline.ingest.usgs:main"
 quake-clean = "quake_pipeline.transform.clean:main"
 quake-dq = "quake_pipeline.quality.checks:cli"
+quake-gold = "quake_pipeline.gold.build:main"
 
 [build-system]
 requires = ["setuptools>=68"]

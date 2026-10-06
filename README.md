@@ -3,7 +3,9 @@
 [![CI](https://github.com/grbohanec/quake-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/grbohanec/quake-pipeline/actions/workflows/ci.yml)
 [![Daily refresh](https://github.com/grbohanec/quake-pipeline/actions/workflows/daily-refresh.yml/badge.svg)](https://github.com/grbohanec/quake-pipeline/actions/workflows/daily-refresh.yml)
 
-An automated data pipeline that pulls every M2.0+ earthquake since 1880 from the [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/) (about 1.55 million events), cleans it into partitioned Parquet on S3, and refreshes itself every morning. Each day's build must pass 14 data quality checks before it is published, so a bad run never reaches the queryable data. The full history is queryable with SQL in Amazon Athena, for a few cents a month.
+An automated data pipeline that pulls every M2.0+ earthquake since 1880 from the [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/) (about 1.55 million events), cleans it into partitioned Parquet on S3, and refreshes itself every morning. Each day's build must pass 14 data quality checks before it is published, so a bad run never reaches the queryable data. The full history is queryable with SQL in Amazon Athena, for a few cents a month, and a [live dashboard](https://grbohanec.github.io/quake-pipeline/) is rebuilt from it every morning.
+
+**[→ Live dashboard](https://grbohanec.github.io/quake-pipeline/)**: recent earthquakes on a map of tectonic plate boundaries, daily trends, the year's strongest quakes, and the pipeline's own health.
 
 This is the rebuilt version of my [Earthquake Severity Prediction Project](https://github.com/grbohanec/Earthquake-Severity-Prediction-Project). That was a one-time Spark notebook on 51 hand-downloaded CSVs that stopped at June 2024; this one ingests automatically and stays current.
 
@@ -21,6 +23,7 @@ flowchart LR
         raw[(data/raw)]
         state[(data/state)]
         cleaned[(data/clean)]
+        goldl[(data/gold)]
     end
 
     ingest <-->|sync| raw
@@ -30,12 +33,15 @@ flowchart LR
     dq -->|results| dqres[(data/dq)]
     cleaned --> athena[Athena SQL]
     dqres --> athena
+    cleaned --> gold[Gold tables<br/>DuckDB] --> goldl
+    gold --> pages[Dashboard<br/>GitHub Pages]
 ```
 
 1. **Ingest** asks USGS only for events added or revised since the last run, and saves them untouched to the raw layer.
 2. **Clean** rebuilds a typed, de-duplicated, validated dataset from raw, partitioned by year.
 3. **Quality checks** audit the new build. Only a build that passes is published; a failure stops the run and sends an alert.
 4. **Athena** queries the clean Parquet files in place, plus the history of every quality check.
+5. **Gold** builds small summary tables from the published data, and the **dashboard** on GitHub Pages is redeployed with them.
 
 ## Example
 
@@ -74,7 +80,12 @@ quake-clean
 quake-dq --freshness-hours 1e9   # skip the freshness check for an old sample
 ```
 
-Data is written to `data/` (git-ignored).
+Data is written to `data/` (git-ignored). To preview the dashboard on that data:
+
+```bash
+quake-gold --site-dir site/data
+python -m http.server -d site 8000   # then open http://localhost:8000
+```
 
 ## Usage
 
@@ -124,6 +135,16 @@ Audits the clean layer and exits with code 1 if any error-level check fails, whi
 
 Thresholds are options: `--freshness-hours`, `--max-volume-drop`, `--max-drop-rate`. The last good run's row count is kept in `data/state/quality.json` and only moves forward when a run passes.
 
+### Gold layer and dashboard
+
+```bash
+quake-gold --site-dir site/data
+```
+
+Builds one small table per dashboard question from the clean layer and the quality check history: headline numbers, M2.5+ quakes from the last 30 days, quakes per day over 90 complete days (quiet days included as 0, so an outage shows as a dip), the year's strongest quakes, and the last 30 pipeline runs. Each is written as Parquet to `data/gold/` (for Athena) and, with `--site-dir`, as JSON for the page.
+
+The dashboard ([`site/`](site/)) is a static page: plain HTML, CSS and JavaScript, with [Leaflet](https://leafletjs.com/) for the maps. Plate boundaries come from the PB2002 model (Bird, 2003), grouped into subduction, other convergent, divergent and transform; [`scripts/build_basemap.py`](scripts/build_basemap.py) rebuilds the committed map layers.
+
 ## How it works
 
 - **The 20,000-event limit.** USGS returns at most 20,000 events per request. The ingester asks the `/count` endpoint first and halves date ranges until each piece fits. Long backfills start as one-year chunks, and timeouts trigger more splitting.
@@ -133,7 +154,7 @@ Thresholds are options: `--freshness-hours`, `--max-volume-drop`, `--max-drop-ra
 
 ## Deployment (AWS + GitHub Actions)
 
-[`daily-refresh.yml`](.github/workflows/daily-refresh.yml) runs every day at 06:17 Tokyo time, and on demand from the Actions tab. It downloads `data/raw` and `data/state` from S3, runs an incremental ingest, rebuilds the clean layer, runs the quality checks, and publishes the clean layer to S3 only if they pass (write, audit, publish).
+[`daily-refresh.yml`](.github/workflows/daily-refresh.yml) runs every day at 06:17 Tokyo time, and on demand from the Actions tab. It downloads `data/raw` and `data/state` from S3, runs an incremental ingest, rebuilds the clean layer, runs the quality checks, and publishes the clean layer to S3 only if they pass (write, audit, publish). It then builds the gold tables and redeploys the dashboard to GitHub Pages, so the page only ever shows data that passed the checks.
 
 **Alerts:** GitHub emails the workflow owner when a scheduled run fails. For a chat alert too, add a Slack or Discord incoming-webhook URL as the secret `ALERT_WEBHOOK_URL`; the message says whether the quality checks failed or the pipeline errored, and links to the run.
 
@@ -161,6 +182,8 @@ The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override
 | Check history stored long, viewed wide | One row per check means adding a check never changes the table's schema; the `dq_runs` view pivots it to one row per run for reading. |
 | Error vs. warn severity | Only problems that make the data wrong block publishing; odd-but-possible values are reported, so alerts stay meaningful. |
 | Known issues acknowledged in a reviewed file | Silencing a check entirely would hide new problems; acknowledging specific records keeps the check sharp, and the file is an audit trail of every exception and why. |
+| Gold tables precomputed daily | The page loads a few hundred KB of JSON instead of querying 1.5M rows; the same tables are Parquet in S3 for anyone using Athena. |
+| Static dashboard on GitHub Pages, not a BI tool | Free, no server or credentials to manage, and it deploys from the same workflow that builds the data. A BI tool (QuickSight, Looker) would fit when many people need ad-hoc filtering. |
 | Volume check against the last *good* run | Comparing with yesterday would let a slow leak of a few rows a day pass every check. |
 
 ## Project layout
@@ -170,11 +193,15 @@ src/quake_pipeline/
   ingest/usgs.py          USGS API -> raw layer
   transform/clean.py      raw layer -> clean layer
   quality/checks.py       quality checks that gate publishing
+  gold/build.py           clean layer -> gold tables for the dashboard
+site/                     the dashboard (static HTML/CSS/JS + map layers)
+scripts/build_basemap.py  builds the dashboard's land and plate-boundary layers
+quality/known_issues.csv  reviewed exceptions to the row-level checks
 tests/                    unit tests, mirroring src/ (offline, fake USGS API)
 sql/athena/               table definition and example queries
 .github/workflows/
   ci.yml                  lint + tests on every push
-  daily-refresh.yml       scheduled pipeline run (write -> audit -> publish)
+  daily-refresh.yml       scheduled pipeline run (write -> audit -> publish -> dashboard)
 ```
 
 ## Roadmap
@@ -185,7 +212,8 @@ sql/athena/               table definition and example queries
 - [x] Data quality checks and failure alerts
 - [ ] JMA source for small earthquakes in Japan
 - [ ] Severity model rebuilt on the clean layer
-- [ ] Dashboard
+- [x] Dashboard on GitHub Pages
+- [ ] Japan section on the dashboard (waiting on the JMA source)
 
 ## License
 
