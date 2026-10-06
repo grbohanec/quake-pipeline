@@ -122,16 +122,22 @@ function buildMap(land, plates, quakes) {
   // Endless panning: worldCopyJump keeps the view within one world width while
   // dragging, and the three identical copies make the wrap invisible. This handler
   // covers the other ways to move (zoom, keyboard) and stops scrolling past the poles.
+  let adjusting = false;
   map.on("moveend", () => {
+    if (adjusting) return;
     const c = map.getCenter();
     const off = c.lng - HOME_LON;
     const lng = Math.abs(off) > 180 ? c.lng - 360 * Math.round(off / 360) : c.lng;
+    // Clamp in pixels: the view's top edge may not go above 84°N, nor its bottom below 80°S.
     const half = map.getSize().y / 2;
     const top = map.project([84, 0]).y + half;
     const bottom = map.project([-80, 0]).y - half;
     const y = map.project(c).y;
-    const lat = top > bottom ? map.unproject([0, (top + bottom) / 2]).lat : map.unproject([0, Math.min(Math.max(y, top), bottom)]).lat;
-    if (lng !== c.lng || Math.abs(lat - c.lat) > 1e-6) map.setView([lat, lng], map.getZoom(), { animate: false });
+    const yClamped = top > bottom ? (top + bottom) / 2 : Math.min(Math.max(y, top), bottom);
+    if (lng === c.lng && Math.abs(yClamped - y) < 1) return;
+    adjusting = true;
+    map.setView([map.unproject([0, yClamped]).lat, lng], map.getZoom(), { animate: false });
+    adjusting = false;
   });
 
   // Colours come from CSS tokens, so they follow light/dark mode.
@@ -158,12 +164,35 @@ function buildMap(land, plates, quakes) {
   return map;
 }
 
+const fmtCount = (n) =>
+  n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e4 ? `${(n / 1e3).toFixed(1)}K` : n.toLocaleString("en-US");
+const fmtDay = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Tokyo", month: "short", day: "numeric" });
+
+function setText(id, text) {
+  document.getElementById(id).textContent = text;
+}
+
+function drawTiles(s) {
+  setText("kpi-24h", s.last_24h.toLocaleString("en-US"));
+  setText("kpi-7d", s.last_7d.toLocaleString("en-US"));
+  if (s.largest_this_month) {
+    const q = s.largest_this_month;
+    setText("kpi-max", `M${q.mag.toFixed(1)}`);
+    setText("kpi-max-note", `${q.place || "Unknown location"} · ${fmtDay.format(new Date(q.time))}`);
+    document.getElementById("kpi-max-note").title = q.place || "";
+  }
+  setText("kpi-total", fmtCount(s.archive_total));
+  setText("kpi-total-note", `earthquakes since ${s.archive_since}`);
+}
+
 async function main() {
-  const [land, plates, recent] = await Promise.all([
+  const [land, plates, recent, summary] = await Promise.all([
     getJSON("assets/land.geojson"),
     getJSON("assets/plate_boundaries.geojson"),
     getJSON("data/recent_quakes.json"),
+    getJSON("data/summary.json"),
   ]);
+  drawTiles(summary);
   const quakes = rowsToObjects(recent);
 
   const updated = document.getElementById("updated");
