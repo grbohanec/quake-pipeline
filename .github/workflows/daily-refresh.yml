@@ -103,7 +103,7 @@ jobs:
           quake-gold --site-dir _site/data
           aws s3 sync data/gold "$S3_DATA/gold" --delete --only-show-errors
 
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
