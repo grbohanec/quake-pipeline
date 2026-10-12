@@ -180,9 +180,9 @@ Thresholds are options: `--freshness-hours`, `--max-volume-drop`, `--max-drop-ra
 quake-gold --site-dir site/data
 ```
 
-Builds one small table per dashboard question from the clean layer and the quality check history: headline numbers, M2.5+ quakes from the last 30 days, quakes per day over 90 complete days (quiet days included as 0, so an outage shows as a dip), the year's strongest quakes, and the last 30 pipeline runs. Each is written as Parquet to `data/gold/` (for Athena) and, with `--site-dir`, as JSON for the page.
+Builds one small table per dashboard question from the clean layer and the quality check history: headline numbers, M2.5+ quakes from the last 30 days, quakes per day over 90 complete days (quiet days included as 0, so an outage shows as a dip), the year's strongest quakes, the last 30 pipeline runs, and for the Japan section: JMA's quakes near Japan in the last 30 days, recent felt quakes with shindo, and how many of JMA's quakes USGS also has, by magnitude. Each is written as Parquet to `data/gold/` (for Athena) and, with `--site-dir`, as JSON for the page.
 
-The dashboard ([`site/`](site/)) is a static page: plain HTML, CSS and JavaScript, with [Leaflet](https://leafletjs.com/) for the maps. Plate boundaries come from the PB2002 model (Bird, 2003), grouped into subduction, other convergent, divergent and transform; [`scripts/build_basemap.py`](scripts/build_basemap.py) rebuilds the committed map layers.
+The dashboard ([`site/`](site/)) is a static page: plain HTML, CSS and JavaScript, with [Leaflet](https://leafletjs.com/) for the maps. Quakes are colored and sized by magnitude on both maps. Plate boundaries come from the PB2002 model (Bird, 2003), grouped into subduction, other convergent, divergent and transform; [`scripts/build_basemap.py`](scripts/build_basemap.py) rebuilds the committed map layers.
 
 ## How it works
 
@@ -258,10 +258,9 @@ sql/athena/               table definition and example queries
 - [x] Clean layer: typed, de-duplicated, validated, partitioned
 - [x] Daily refresh on GitHub Actions, stored in S3, queryable in Athena
 - [x] Data quality checks and failure alerts
-- [ ] JMA source for small earthquakes in Japan
+- [x] JMA source for small earthquakes in Japan, linked to USGS
 - [ ] Severity model rebuilt on the clean layer
-- [x] Dashboard on GitHub Pages
-- [ ] Japan section on the dashboard (waiting on the JMA source)
+- [x] Dashboard on GitHub Pages, with a Japan section from JMA
 
 ## License
 
