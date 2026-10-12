@@ -82,18 +82,34 @@ function rowsToObjects({ columns, rows }) {
   return rows.map((r) => Object.fromEntries(columns.map((c, i) => [c, r[i]])));
 }
 
-function drawSizeLegend() {
-  const box = document.getElementById("size-legend");
-  for (const m of [3, 5, 7]) {
+// Magnitude bands, shared by both maps. Colour and size both grow with magnitude,
+// so the strongest quakes stand out even for readers who can't tell the shades apart.
+const MAG_BANDS = [
+  { max: 3, label: "Below 3", token: "--mag-1", ref: 2.6 },
+  { max: 4, label: "3–4", token: "--mag-2", ref: 3.5 },
+  { max: 5, label: "4–5", token: "--mag-3", ref: 4.5 },
+  { max: 6, label: "5–6", token: "--mag-4", ref: 5.5 },
+  { max: Infinity, label: "6+", token: "--mag-5", ref: 6.5 },
+];
+const magBand = (m) => MAG_BANDS.find((b) => m < b.max);
+const magColor = (m) => css(magBand(m).token);
+
+function drawMagLegend(id, bands = MAG_BANDS) {
+  const box = document.getElementById(id);
+  const title = document.createElement("span");
+  title.textContent = "Magnitude";
+  box.append(title);
+  for (const b of bands) {
+    const item = document.createElement("span");
+    item.className = "item";
     const d = document.createElement("span");
-    const px = 2 * radius(m);
     d.className = "dot";
+    const px = 2 * radius(b.ref);
     d.style.width = d.style.height = `${px}px`;
-    const label = document.createElement("span");
-    label.textContent = `M${m}`;
-    box.append(d, label);
+    d.style.background = `var(${b.token})`;
+    item.append(d, document.createTextNode(b.label));
+    box.append(item);
   }
-  box.style.gap = "6px";
 }
 
 function buildMap(land, plates, quakes) {
@@ -164,7 +180,7 @@ function buildMap(land, plates, quakes) {
       return { color, weight: t === "subduction" ? 3.5 : 1.6, opacity: 0.95, lineCap: "round", lineJoin: "round" };
     });
     quakeLayer.eachLayer((m) =>
-      m.setStyle({ color: css("--surface"), fillColor: css("--quake"), fillOpacity: 0.42, opacity: 0.7 }),
+      m.setStyle({ color: css("--surface"), fillColor: magColor(m.options.mag), fillOpacity: 0.8, opacity: 0.8 }),
     );
   }
   // Smaller dots on narrow screens, so dense regions don't turn into one blob.
@@ -337,15 +353,6 @@ function drawStrongest(table, year) {
   );
 }
 
-// Depth bands for the Japan map: shallow crustal / interface / intermediate slab / deep slab.
-const DEPTH_BANDS = [
-  { max: 30, label: "0–30 km", token: "--depth-1" },
-  { max: 70, label: "30–70 km", token: "--depth-2" },
-  { max: 300, label: "70–300 km", token: "--depth-3" },
-  { max: Infinity, label: "300+ km", token: "--depth-4" },
-];
-const depthBand = (d) => DEPTH_BANDS.find((b) => d < b.max);
-
 // Rough label positions for the plates that meet around Japan.
 const JAPAN_PLATES = [
   { name: "Pacific\nPlate", at: [36.5, 147.2] },
@@ -377,10 +384,10 @@ function buildJapanMap(land, plates, quakes) {
       .getElement().textContent = p.name.replace("\n", " ");
   }
 
-  // Shallow last, so the many shallow quakes sit on top of the deeper ones.
-  const sorted = [...quakes].sort((a, b) => (b.depth ?? 0) - (a.depth ?? 0));
+  // Biggest first, so small quakes are drawn on top and stay hoverable.
+  const sorted = [...quakes].sort((a, b) => b.mag - a.mag);
   const markers = sorted.map((q) =>
-    L.circleMarker([q.lat, q.lon], { radius: radius(q.mag, 1.15), weight: 1, depth: q.depth ?? 0 })
+    L.circleMarker([q.lat, q.lon], { radius: radius(q.mag, 1.15), weight: 1, mag: q.mag })
       .bindTooltip(() => tooltipNode(q), { direction: "top", offset: [0, -4] })
       .addTo(map),
   );
@@ -394,34 +401,23 @@ function buildJapanMap(land, plates, quakes) {
       lineCap: "round",
     }));
     for (const m of markers) {
-      m.setStyle({ color: css("--surface"), fillColor: css(depthBand(m.options.depth).token), fillOpacity: 0.85, opacity: 0.9 });
+      m.setStyle({ color: css("--surface"), fillColor: magColor(m.options.mag), fillOpacity: 0.85, opacity: 0.9 });
     }
   }
   applyTheme();
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
 }
 
-function drawDepthLegend() {
-  const box = document.getElementById("depth-legend");
-  const title = document.createElement("span");
-  title.textContent = "Depth";
-  box.append(title);
-  for (const b of DEPTH_BANDS) {
-    const item = document.createElement("span");
-    item.className = "item";
-    const sw = document.createElement("span");
-    sw.className = "swatch";
-    sw.style.background = `var(${b.token})`;
-    item.append(sw, document.createTextNode(b.label));
-    box.append(item);
-  }
-  const sep = document.createElement("span");
-  sep.className = "item";
+function drawJapanLegend() {
+  // The Japan map shows M2+, so its smallest band starts at 2.
+  drawMagLegend("japan-legend", [{ ...MAG_BANDS[0], label: "2–3" }, ...MAG_BANDS.slice(1)]);
+  const item = document.createElement("span");
+  item.className = "item";
   const line = document.createElement("span");
   line.className = "line thick";
   line.style.borderColor = "var(--plate-line)";
-  sep.append(line, document.createTextNode("Subduction zone"));
-  box.append(sep);
+  item.append(line, document.createTextNode("Subduction zone"));
+  document.getElementById("japan-legend").append(item);
 }
 
 // Shindo levels from 5- up are the ones that cause damage; colour them so they stand out.
@@ -599,7 +595,7 @@ async function main() {
       getJSON("data/jma_usgs_coverage.json").catch(() => null),
     ]);
     document.querySelector(".card.japan").hidden = false;
-    drawDepthLegend();
+    drawJapanLegend();
     drawJapanSide(japan, felt, coverage);
     buildJapanMap(land, plates, rowsToObjects(japan));
   }
@@ -617,7 +613,7 @@ async function main() {
   document.getElementById("map-sub").textContent =
     `${quakes.length.toLocaleString("en-US")} earthquakes of M2.5 and larger, on the boundaries between tectonic plates.`;
 
-  drawSizeLegend();
+  drawMagLegend("size-legend");
   buildMap(land, plates, quakes);
 }
 

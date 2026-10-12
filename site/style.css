@@ -9,14 +9,14 @@
   --text-muted: #6f6d68;
   --grid: #e1e0d9;
   --border: rgba(11, 11, 11, 0.1);
-  --quake: #2b2a27;
   --plate-convergent: #eb6834;
   --plate-divergent: #2a78d6;
   --plate-transform: #1baf7a;
-  --depth-1: #86b6ef;
-  --depth-2: #3987e5;
-  --depth-3: #1c5cab;
-  --depth-4: #0d366b;
+  --mag-1: #a093ec;
+  --mag-2: #7f6fe2;
+  --mag-3: #5c49d1;
+  --mag-4: #4031a8;
+  --mag-5: #281b72;
   --plate-line: #6f6d68;
   --good: #0ca30c;
   --warning: #fab219;
@@ -33,14 +33,14 @@
     --text-muted: #9a9890;
     --grid: #2c2c2a;
     --border: rgba(255, 255, 255, 0.1);
-    --quake: #f3f2ee;
     --plate-convergent: #d95926;
     --plate-divergent: #3987e5;
     --plate-transform: #199e70;
-    --depth-1: #256abf;
-    --depth-2: #3987e5;
-    --depth-3: #6da7ec;
-    --depth-4: #b7d3f6;
+    --mag-1: #5a4cc8;
+    --mag-2: #7465de;
+    --mag-3: #9488ea;
+    --mag-4: #b6aef2;
+    --mag-5: #dcd8fa;
     --plate-line: #9a9890;
   }
 }
@@ -54,14 +54,14 @@
   --text-muted: #9a9890;
   --grid: #2c2c2a;
   --border: rgba(255, 255, 255, 0.1);
-  --quake: #f3f2ee;
   --plate-convergent: #d95926;
   --plate-divergent: #3987e5;
   --plate-transform: #199e70;
-  --depth-1: #256abf;
-  --depth-2: #3987e5;
-  --depth-3: #6da7ec;
-  --depth-4: #b7d3f6;
+  --mag-1: #5a4cc8;
+  --mag-2: #7465de;
+  --mag-3: #9488ea;
+  --mag-4: #b6aef2;
+  --mag-5: #dcd8fa;
   --plate-line: #9a9890;
 }
 
@@ -105,8 +105,10 @@ header.top p { margin: 4px 0 0; color: var(--text-secondary); }
 .legend .item { display: inline-flex; align-items: center; gap: 8px; }
 .legend .line { display: inline-block; width: 22px; border-top: 2px solid; border-radius: 2px; }
 .legend .line.thick { border-top-width: 4px; }
-.legend .dot { display: inline-block; border-radius: 50%; background: var(--quake); opacity: 0.6; }
+.legend .dot { display: inline-block; border-radius: 50%; }
 .legend .sep { width: 1px; height: 16px; background: var(--grid); }
+.legend .mag-legend { gap: 6px 14px; flex-wrap: wrap; }
+.legend .mag-legend .item { gap: 6px; }
 
 .tip { font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
 .tip strong { font-size: 15px; }

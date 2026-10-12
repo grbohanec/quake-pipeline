@@ -35,7 +35,7 @@
         <span class="item"><span class="line" style="border-color: var(--plate-divergent)"></span>Divergent</span>
         <span class="item"><span class="line" style="border-color: var(--plate-transform)"></span>Transform</span>
         <span class="sep"></span>
-        <span class="item" id="size-legend"></span>
+        <span class="item mag-legend" id="size-legend"></span>
       </div>
     </section>
 
@@ -65,11 +65,11 @@
     <!-- Japan section, from JMA. Shown once data/japan_quakes.json comes from JMA. -->
     <section class="card japan" aria-labelledby="japan-title" hidden>
       <h2 id="japan-title">Japan</h2>
-      <p class="sub" id="japan-sub">Four plates meet under Japan. Color shows depth: quakes get deeper as the Pacific and Philippine Sea plates dive under the islands. Data from the Japan Meteorological Agency (JMA), whose dense network locates far more small quakes than global catalogs.</p>
+      <p class="sub" id="japan-sub">Four plates meet under Japan, where the Pacific and Philippine Sea plates dive under the islands. Data from the Japan Meteorological Agency (JMA), whose dense network locates far more small quakes than global catalogs.</p>
       <div class="japan-grid">
         <div>
-          <div id="japan-map" role="img" aria-label="Map of earthquakes around Japan in the last 30 days, coloured by depth"></div>
-          <div class="legend" id="depth-legend" aria-label="Depth legend"></div>
+          <div id="japan-map" role="img" aria-label="Map of earthquakes around Japan in the last 30 days, coloured by magnitude"></div>
+          <div class="legend" id="japan-legend" aria-label="Map legend"></div>
           <p class="note-line" id="japan-note"></p>
         </div>
         <div class="japan-side">
