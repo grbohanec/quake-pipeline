@@ -45,7 +45,7 @@ FROM (SELECT year, count(*) AS jma_quakes FROM quakes.jma_events
       GROUP BY year) j
 JOIN (SELECT year, count(*) AS usgs_quakes FROM quakes.usgs_events
       WHERE year >= 2015 AND latitude BETWEEN 24 AND 46 AND longitude BETWEEN 122 AND 150
-      GROUP BY year) u USING (year)
+      GROUP BY year) u ON u.year = j.year
 ORDER BY j.year;
 
 -- Same quake, two magnitudes: how USGS magnitudes (mostly Mw) compare with JMA's Mj.
