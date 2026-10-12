@@ -1,0 +1,91 @@
+# One-time JMA backfill: download the full hypocenter catalog (1919 onward) and
+# every daily list since the catalog ends, then save them to S3. After it has
+# run once, the daily refresh picks JMA up automatically.
+#
+# Run it from the Actions tab ("Run workflow"). It takes roughly 20-40 minutes:
+# about 1,000 daily pages are fetched with a pause between requests, to be polite
+# to JMA's servers. If it stops early, run it again: it resumes where it left off.
+#
+# Uses the same AWS settings as daily-refresh.yml.
+
+name: JMA backfill
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: daily-refresh  # never run at the same time as the daily refresh
+  cancel-in-progress: false
+
+env:
+  S3_BUCKET: ${{ vars.S3_BUCKET || 'gabe-quake-pipeline' }}
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
+  S3_DATA: s3://${{ vars.S3_BUCKET || 'gabe-quake-pipeline' }}/data
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pipeline
+        run: pip install -e .
+
+      - name: Authenticate to AWS (OIDC role)
+        if: vars.AWS_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Authenticate to AWS (access key)
+        if: vars.AWS_ROLE_ARN == ''
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download earlier JMA progress from S3
+        # Lets an interrupted backfill resume instead of starting over.
+        run: |
+          aws s3 sync "$S3_DATA/raw/jma" data/raw/jma --only-show-errors
+          aws s3 sync "$S3_DATA/state" data/state --only-show-errors
+
+      - name: Download catalog, daily lists and a feed snapshot
+        run: quake-ingest-jma --catalog --daily --feed
+
+      - name: Check the files parse
+        # Builds the clean layer once as a smoke test; the daily refresh rebuilds
+        # and audits it properly, and is what publishes it.
+        run: quake-clean-jma
+
+      - name: Upload to S3
+        # Even after a failure, so the next attempt resumes from the saved progress.
+        if: always()
+        run: |
+          aws s3 sync data/raw/jma "$S3_DATA/raw/jma" --only-show-errors
+          if [ -f data/state/jma.json ]; then aws s3 cp data/state/jma.json "$S3_DATA/state/jma.json" --only-show-errors; fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### JMA backfill"
+            echo "- Catalog files: $(find data/raw/jma/catalog -name '*.zip' 2>/dev/null | wc -l)"
+            echo "- Daily lists: $(find data/raw/jma/daily -name '*.html.gz' 2>/dev/null | wc -l)"
+            if [ -f data/state/clean_summary_jma.json ]; then
+              echo '```json'; cat data/state/clean_summary_jma.json; echo '```'
+            fi
+            echo "Next: run **Daily refresh** once to publish JMA and turn on the dashboard's Japan section."
+          } >> "$GITHUB_STEP_SUMMARY"

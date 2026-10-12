@@ -1,7 +1,10 @@
 # Daily refresh: pull new/revised earthquakes from USGS, rebuild the cleaned
 # layer, check its quality, and publish it to S3 only if the checks pass
-# (write -> audit -> publish). Then build the gold tables and redeploy the
-# dashboard on GitHub Pages.
+# (write -> audit -> publish). JMA (Japan) goes through the same steps
+# separately, so a problem with one source never blocks the other. Then build
+# the gold tables and redeploy the dashboard on GitHub Pages.
+#
+# JMA steps are skipped until its one-time backfill has run (jma-backfill.yml).
 #
 # Repository settings (Settings > Secrets and variables > Actions):
 #   Optional variables S3_BUCKET / AWS_REGION override the defaults in `env` below.
@@ -34,6 +37,8 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      pages_ready: ${{ steps.pages.outputs.ready }}
     steps:
       - uses: actions/checkout@v7
 
@@ -44,6 +49,10 @@ jobs:
 
       - name: Install pipeline
         run: pip install -e .
+
+      - name: Name this run
+        # One id for the whole run, so the dashboard groups both sources' checks together.
+        run: echo "QUAKE_RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)" >> "$GITHUB_ENV"
 
       # Preferred: OIDC role (no stored keys), used when AWS_ROLE_ARN is set.
       - name: Authenticate to AWS (OIDC role)
@@ -87,12 +96,57 @@ jobs:
 
       - name: Data quality checks (audit)
         id: dq
-        run: quake-dq
+        run: quake-dq --dataset usgs
 
       - name: Publish cleaned layer to S3 (publish)
         # Only reached when every error-level check passed. The layer is
         # replaced wholesale, so --delete removes files that no longer exist.
-        run: aws s3 sync data/clean "$S3_DATA/clean" --delete --only-show-errors
+        run: aws s3 sync data/clean/usgs "$S3_DATA/clean/usgs" --delete --only-show-errors
+
+      # --- JMA (Japan): same write -> audit -> publish, isolated with continue-on-error
+      # so the USGS data and the dashboard still update if JMA's site is down.
+      - name: Ingest JMA (catalog, daily lists, felt feed)
+        id: jma_ingest
+        if: hashFiles('data/state/jma.json') != ''
+        continue-on-error: true
+        run: quake-ingest-jma --catalog --daily --feed
+
+      - name: Upload JMA raw data and state to S3
+        if: steps.jma_ingest.outcome != 'skipped'
+        run: |
+          aws s3 sync data/raw/jma "$S3_DATA/raw/jma" --only-show-errors
+          aws s3 sync data/state "$S3_DATA/state" --only-show-errors
+
+      - name: Rebuild JMA clean layer and link it to USGS (write)
+        id: jma_clean
+        if: steps.jma_ingest.outcome != 'skipped'
+        continue-on-error: true
+        run: |
+          quake-clean-jma
+          quake-match
+
+      - name: JMA data quality checks (audit)
+        id: jma_dq
+        if: steps.jma_clean.outcome == 'success'
+        continue-on-error: true
+        run: quake-dq --dataset jma
+
+      - name: Publish JMA clean layer to S3 (publish)
+        if: steps.jma_dq.outcome == 'success'
+        run: |
+          for t in jma jma_felt jma_usgs_matches; do
+            aws s3 sync "data/clean/$t" "$S3_DATA/clean/$t" --delete --only-show-errors
+          done
+
+      - name: Restore last good JMA build
+        # A failed JMA build is never published, and the dashboard is built from the
+        # last good copy instead.
+        if: steps.jma_clean.outcome == 'failure' || steps.jma_dq.outcome == 'failure'
+        run: |
+          for t in jma jma_felt jma_usgs_matches; do
+            rm -rf "data/clean/$t"
+            aws s3 sync "$S3_DATA/clean/$t" "data/clean/$t" --only-show-errors
+          done
 
       - name: Build gold layer and dashboard
         # Small summary tables from the published clean layer: Parquet for Athena,
@@ -106,6 +160,10 @@ jobs:
       - uses: actions/upload-pages-artifact@v4
         with:
           path: _site
+
+      - name: Mark dashboard ready
+        id: pages
+        run: echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload quality results to S3
         # Passed or failed, keep the record (queryable as quakes.dq_results).
@@ -122,7 +180,24 @@ jobs:
           print("### Daily refresh")
           print(f"- New or revised events this run: **{s.get('last_run_events', 0)}**")
           print(f"- Latest USGS update seen: `{s.get('max_updated')}`")
+          try:
+              j = json.load(open("data/state/jma.json"))
+              print(f"- JMA: {j.get('last_run', {})}, daily lists up to `{j.get('daily_done_until')}`")
+          except FileNotFoundError:
+              print("- JMA: not set up yet (run the JMA backfill workflow)")
           EOF
+
+      - name: Fail the run if JMA had a problem
+        # Placed after publishing, so USGS and the dashboard are already updated;
+        # failing here still triggers GitHub's failure email and the alert below.
+        if: steps.jma_ingest.outcome == 'failure' || steps.jma_clean.outcome == 'failure' || steps.jma_dq.outcome == 'failure'
+        env:
+          INGEST: ${{ steps.jma_ingest.outcome }}
+          CLEAN: ${{ steps.jma_clean.outcome }}
+          CHECKS: ${{ steps.jma_dq.outcome }}
+        run: |
+          echo "JMA ingest: $INGEST, clean: $CLEAN, checks: $CHECKS"
+          exit 1
 
       - name: Alert on failure
         # GitHub already emails the workflow owner when a scheduled run fails.
@@ -133,10 +208,17 @@ jobs:
           WEBHOOK: ${{ secrets.ALERT_WEBHOOK_URL }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           DQ_OUTCOME: ${{ steps.dq.outcome }}
+          JMA_DQ_OUTCOME: ${{ steps.jma_dq.outcome }}
+          JMA_INGEST_OUTCOME: ${{ steps.jma_ingest.outcome }}
+          JMA_CLEAN_OUTCOME: ${{ steps.jma_clean.outcome }}
         run: |
           if [ -z "$WEBHOOK" ]; then echo "No ALERT_WEBHOOK_URL set; relying on GitHub's failure email."; exit 0; fi
           if [ "$DQ_OUTCOME" = "failure" ]; then
             reason="data quality checks failed, clean layer NOT published (Athena still serves the last good build)"
+          elif [ "$JMA_DQ_OUTCOME" = "failure" ]; then
+            reason="JMA data quality checks failed, JMA layer NOT published (USGS and the dashboard still updated)"
+          elif [ "$JMA_INGEST_OUTCOME" = "failure" ] || [ "$JMA_CLEAN_OUTCOME" = "failure" ]; then
+            reason="the JMA steps errored (USGS and the dashboard still updated)"
           else
             reason="the pipeline errored before publishing"
           fi
@@ -147,10 +229,12 @@ jobs:
           EOF
           curl -fsS -X POST -H "Content-Type: application/json" --data @payload.json "$WEBHOOK"
 
-  # Publishes the dashboard to GitHub Pages. Only runs when the refresh (and so
-  # the quality checks) passed, so the page never shows a bad build.
+  # Publishes the dashboard to GitHub Pages. Only runs once the page has been
+  # built from data that passed its checks, so the page never shows a bad build.
   deploy-dashboard:
     needs: refresh
+    # Also runs when only the JMA part failed: the page was built from good data either way.
+    if: always() && needs.refresh.outputs.pages_ready == 'true'
     runs-on: ubuntu-latest
     permissions:
       pages: write

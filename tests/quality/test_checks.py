@@ -100,7 +100,7 @@ def test_implausible_depth_only_warns(tmp_path):
 
 def test_row_count_drop_fails(tmp_path):
     build(tmp_path, good_rows(3))
-    (tmp_path / "state" / checks.BASELINE_FILE).write_text(json.dumps({"row_count": 100}))
+    (tmp_path / "state" / checks.USGS.baseline_file).write_text(json.dumps({"row_count": 100}))
     r = by_name(checks.run_checks(tmp_path, NOW, LOOSE))["row count did not drop"]
     assert r.blocking and r.value == pytest.approx(-0.97)
 
@@ -126,17 +126,18 @@ def test_main_success_writes_history_and_baseline(tmp_path, monkeypatch):
         ["--data-dir", str(tmp_path), "--freshness-hours", "1e9", "--known-issues", str(NO_FILE)]
     )
     assert rc == 0
-    assert json.loads((tmp_path / "state" / checks.BASELINE_FILE).read_text())["row_count"] == 3
+    assert json.loads((tmp_path / "state" / checks.USGS.baseline_file).read_text())["row_count"] == 3
     [hist] = (tmp_path / "dq" / "results").glob("dq_*.parquet")
     df = pd.read_parquet(hist)
     assert df["passed"].all() and df.loc[df["check"] == "not empty", "value"].item() == 3
-    assert "Data quality: passed" in summary.read_text()
+    assert "Data quality (USGS): passed" in summary.read_text()
+    assert (df["dataset"] == "usgs").all()
 
 
 def test_main_failure_exits_1_and_keeps_old_baseline(tmp_path, monkeypatch):
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     build(tmp_path, good_rows())
-    baseline = tmp_path / "state" / checks.BASELINE_FILE
+    baseline = tmp_path / "state" / checks.USGS.baseline_file
     baseline.write_text(json.dumps({"row_count": 100}))
     rc = checks.main(
         ["--data-dir", str(tmp_path), "--freshness-hours", "1e9", "--known-issues", str(NO_FILE)]
