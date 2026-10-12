@@ -51,16 +51,31 @@ function tooltipNode(q) {
   const head = document.createElement("strong");
   head.textContent = `M${q.mag.toFixed(1)}`;
   const place = document.createElement("div");
-  place.textContent = q.place || "Unknown location";
+  place.textContent = prettyPlace(q.place) || "Unknown location";
   const when = document.createElement("div");
   when.className = "muted";
   const t = new Date(q.time);
   when.textContent = `${fmtUTC.format(t)} UTC · ${fmtJST.format(t)} JST`;
   const depth = document.createElement("div");
   depth.className = "muted";
-  depth.textContent = `Depth ${Math.round(q.depth)} km`;
+  depth.textContent = q.depth == null ? "Depth not determined" : `Depth ${Math.round(q.depth)} km`;
   el.append(head, place, when, depth);
   return el;
+}
+
+// JMA's catalog names are upper-case abbreviations ("NE OFF IBARAKI PREF"); make them readable.
+const PLACE_WORDS = { PREF: "Pref.", PEN: "Pen.", IS: "Is.", REG: "Region", OFF: "off", FAR: "far", NEAR: "near" };
+const COMPASS = new Set(["N", "S", "E", "W", "NE", "NW", "SE", "SW", "NNE", "ENE", "ESE", "SSE", "SSW", "WSW", "WNW", "NNW"]);
+function prettyPlace(place) {
+  if (!place || place !== place.toUpperCase() || !/[A-Z]/.test(place)) return place;
+  return place
+    .split(/\s+/)
+    .map((w, i) => {
+      if (COMPASS.has(w)) return w;
+      if (PLACE_WORDS[w]) return i === 0 ? PLACE_WORDS[w][0].toUpperCase() + PLACE_WORDS[w].slice(1) : PLACE_WORDS[w];
+      return w.charAt(0) + w.slice(1).toLowerCase();
+    })
+    .join(" ");
 }
 
 function rowsToObjects({ columns, rows }) {
@@ -322,10 +337,6 @@ function drawStrongest(table, year) {
   );
 }
 
-// The Japan section waits for the JMA data source, which records far more small
-// Japanese quakes than USGS. Flip this once data/japan_quakes.json comes from JMA.
-const SHOW_JAPAN = false;
-
 // Depth bands for the Japan map: shallow crustal / interface / intermediate slab / deep slab.
 const DEPTH_BANDS = [
   { max: 30, label: "0–30 km", token: "--depth-1" },
@@ -367,9 +378,9 @@ function buildJapanMap(land, plates, quakes) {
   }
 
   // Shallow last, so the many shallow quakes sit on top of the deeper ones.
-  const sorted = [...quakes].sort((a, b) => b.depth - a.depth);
+  const sorted = [...quakes].sort((a, b) => (b.depth ?? 0) - (a.depth ?? 0));
   const markers = sorted.map((q) =>
-    L.circleMarker([q.lat, q.lon], { radius: radius(q.mag, 1.15), weight: 1, depth: q.depth })
+    L.circleMarker([q.lat, q.lon], { radius: radius(q.mag, 1.15), weight: 1, depth: q.depth ?? 0 })
       .bindTooltip(() => tooltipNode(q), { direction: "top", offset: [0, -4] })
       .addTo(map),
   );
@@ -413,33 +424,80 @@ function drawDepthLegend() {
   box.append(sep);
 }
 
-function drawJapanSide(quakes) {
-  setText("jp-count", quakes.length.toLocaleString("en-US"));
+// Shindo levels from 5- up are the ones that cause damage; colour them so they stand out.
+const shindoClass = (s) => (/^[67]/.test(s) ? "shindo severe" : /^5/.test(s) ? "shindo strong" : "shindo");
+
+function drawJapanSide(table, felt, coverage) {
+  const quakes = rowsToObjects(table);
+  setText("jp-count", (table.located_total ?? quakes.length).toLocaleString("en-US"));
+  if (table.usgs_total != null) {
+    setText("jp-count-note", `located by JMA (USGS lists ${table.usgs_total.toLocaleString("en-US")})`);
+  }
   if (quakes.length) {
     const top = quakes.reduce((a, b) => (b.mag > a.mag ? b : a));
     setText("jp-max", `M${top.mag.toFixed(1)}`);
-    setText("jp-max-note", top.place || "");
+    setText("jp-max-note", prettyPlace(top.place) || "");
   }
+  if (table.newest) {
+    const fmtDay = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", month: "short", day: "numeric" });
+    setText(
+      "japan-note",
+      `M${table.min_mag.toFixed(1)}+ shown. JMA publishes each day's list two days later, so the map runs to ` +
+        `${fmtDay.format(new Date(table.newest))}; recent days are preliminary.`,
+    );
+  }
+
   const fmtWhen = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-  const recent = quakes.filter((q) => q.mag >= 4).sort((a, b) => b.time - a.time).slice(0, 10);
   const tbody = document.querySelector("#japan-table tbody");
   tbody.replaceChildren(
-    ...recent.map((q) => {
+    ...rowsToObjects(felt).map((q) => {
       const tr = document.createElement("tr");
-      for (const [cls, text] of [
+      const cells = [
         ["when", fmtWhen.format(new Date(q.time))],
-        ["num mag", q.mag.toFixed(1)],
-        ["", q.place || "Unknown location"],
-        ["num depth", `${Math.round(q.depth)} km`],
-      ]) {
+        ["num", null],
+        ["num mag", q.mag == null ? "–" : q.mag.toFixed(1)],
+        ["", prettyPlace(q.place) || "Unknown location"],
+      ];
+      for (const [cls, text] of cells) {
         const td = document.createElement("td");
         td.className = cls;
-        td.textContent = text;
+        if (text === null) {
+          const badge = document.createElement("span");
+          badge.className = shindoClass(q.shindo);
+          badge.textContent = q.shindo;
+          td.append(badge);
+        } else {
+          td.textContent = text;
+        }
         tr.append(td);
       }
       return tr;
     }),
   );
+
+  if (coverage && coverage.rows.length) {
+    document.getElementById("coverage-block").hidden = false;
+    const fmt = (n) => n.toLocaleString("en-US");
+    document.querySelector("#coverage-table tbody").replaceChildren(
+      ...rowsToObjects(coverage).map((r) => {
+        const tr = document.createElement("tr");
+        const pct = r.jma_quakes ? (100 * r.in_usgs) / r.jma_quakes : 0;
+        const diff = r.median_mag_diff == null ? "–" : `${r.median_mag_diff > 0 ? "+" : ""}${r.median_mag_diff.toFixed(2)}`;
+        for (const [cls, text] of [
+          ["", r.band >= 6 ? "M6+" : `M${r.band}`],
+          ["num", fmt(r.jma_quakes)],
+          ["num", `${pct < 1 && pct > 0 ? pct.toFixed(2) : pct.toFixed(pct < 10 ? 1 : 0)}%`],
+          ["num", diff],
+        ]) {
+          const td = document.createElement("td");
+          td.className = cls;
+          td.textContent = text;
+          tr.append(td);
+        }
+        return tr;
+      }),
+    );
+  }
 }
 
 const STATUS = {
@@ -533,12 +591,17 @@ async function main() {
   drawStrongest(strongest, strongest.year);
   const [runs, latestChecks] = await Promise.all([getJSON("data/pipeline_runs.json"), getJSON("data/latest_checks.json")]);
   drawHealth(runs, latestChecks);
-  if (SHOW_JAPAN) {
-    const japan = rowsToObjects(await getJSON("data/japan_quakes.json"));
+  // The Japan section is built from JMA data; until that source exists the page hides it.
+  const japan = await getJSON("data/japan_quakes.json");
+  if (japan.source === "jma") {
+    const [felt, coverage] = await Promise.all([
+      getJSON("data/japan_felt.json"),
+      getJSON("data/jma_usgs_coverage.json").catch(() => null),
+    ]);
     document.querySelector(".card.japan").hidden = false;
     drawDepthLegend();
-    drawJapanSide(japan);
-    buildJapanMap(land, plates, japan);
+    drawJapanSide(japan, felt, coverage);
+    buildJapanMap(land, plates, rowsToObjects(japan));
   }
   const quakes = rowsToObjects(recent);
 

@@ -1,7 +1,7 @@
 [project]
 name = "quake-pipeline"
 version = "0.1.0"
-description = "Earthquake data pipeline: USGS ingestion into an S3 data lake, queryable with Athena"
+description = "Earthquake data pipeline: USGS and JMA ingestion into an S3 data lake, queryable with Athena"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Gabriel Bohanec" }]
@@ -18,7 +18,10 @@ dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
 quake-ingest-usgs = "quake_pipeline.ingest.usgs:main"
+quake-ingest-jma = "quake_pipeline.ingest.jma:main"
 quake-clean = "quake_pipeline.transform.clean:main"
+quake-clean-jma = "quake_pipeline.transform.clean_jma:main"
+quake-match = "quake_pipeline.transform.match:main"
 quake-dq = "quake_pipeline.quality.checks:cli"
 quake-gold = "quake_pipeline.gold.build:main"
 
@@ -30,7 +33,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 testpaths = ["tests"]
 
 [tool.ruff]

@@ -62,26 +62,38 @@
       </section>
     </div>
 
-    <!-- Japan section: hidden until the JMA data source is added (see roadmap). -->
+    <!-- Japan section, from JMA. Shown once data/japan_quakes.json comes from JMA. -->
     <section class="card japan" aria-labelledby="japan-title" hidden>
       <h2 id="japan-title">Japan</h2>
-      <p class="sub" id="japan-sub">Four plates meet under Japan. Color shows depth: quakes get deeper as the Pacific and Philippine Sea plates dive under the islands.</p>
+      <p class="sub" id="japan-sub">Four plates meet under Japan. Color shows depth: quakes get deeper as the Pacific and Philippine Sea plates dive under the islands. Data from the Japan Meteorological Agency (JMA), whose dense network locates far more small quakes than global catalogs.</p>
       <div class="japan-grid">
         <div>
           <div id="japan-map" role="img" aria-label="Map of earthquakes around Japan in the last 30 days, coloured by depth"></div>
           <div class="legend" id="depth-legend" aria-label="Depth legend"></div>
+          <p class="note-line" id="japan-note"></p>
         </div>
         <div class="japan-side">
           <div class="mini-stats">
-            <div><div class="label">Last 30 days</div><div class="value" id="jp-count">–</div><div class="note">earthquakes near Japan</div></div>
+            <div><div class="label">Last 30 days</div><div class="value" id="jp-count">–</div><div class="note" id="jp-count-note">earthquakes located by JMA</div></div>
             <div><div class="label">Largest</div><div class="value" id="jp-max">–</div><div class="note" id="jp-max-note"></div></div>
           </div>
-          <h3>Recent M4+ near Japan</h3>
+          <h3>Recent felt earthquakes</h3>
           <div class="table-scroll">
             <table class="ranked" id="japan-table">
-              <thead><tr><th>When (JST)</th><th class="num">Mag</th><th>Where</th><th class="num">Depth</th></tr></thead>
+              <thead><tr><th>When (JST)</th><th class="num" title="Shindo: JMA seismic intensity, how strongly the shaking was felt (scale 1 to 7)">Shindo</th><th class="num">Mag</th><th>Where</th></tr></thead>
               <tbody></tbody>
             </table>
+          </div>
+          <p class="note-line">Shindo (震度) is JMA's 1–7 scale for how strongly shaking was felt at the surface.</p>
+          <div id="coverage-block" hidden>
+            <h3>Why a second source</h3>
+            <div class="table-scroll">
+              <table class="ranked" id="coverage-table">
+                <thead><tr><th title="JMA magnitude">Mag</th><th class="num" title="Earthquakes in the JMA catalog">JMA</th><th class="num" title="Share also in the USGS catalog">In USGS</th><th class="num" title="Median of USGS magnitude minus JMA magnitude, for the same quakes">Mag gap</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p class="note-line">Quakes near Japan since 2000 by JMA magnitude, linked across the two catalogs by time and distance. Mag gap: median USGS magnitude minus JMA magnitude for the same quake.</p>
           </div>
         </div>
       </div>
@@ -117,7 +129,8 @@
     </section>
 
     <footer class="credits">
-      Earthquake data: <a href="https://earthquake.usgs.gov/fdsnws/event/1/">USGS</a>.
+      Earthquake data: <a href="https://earthquake.usgs.gov/fdsnws/event/1/">USGS</a>;
+      Japan: <a href="https://www.data.jma.go.jp/eqev/data/bulletin/hypo.html">Japan Meteorological Agency</a> (processed by quake-pipeline).
       Plate boundaries: P. Bird (2003), PB2002, via Ahlenius / Nordpil (ODC-BY).
       Land: Natural Earth.
       Built by <a href="https://github.com/grbohanec/quake-pipeline">quake-pipeline</a>.

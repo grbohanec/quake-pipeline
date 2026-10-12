@@ -177,6 +177,12 @@ details.table-view .table-scroll { max-height: 240px; overflow-y: auto; margin-t
 .mini-stats .value { font-size: 26px; font-weight: 640; line-height: 1.2; }
 .mini-stats .note { color: var(--text-muted); font-size: 12px; }
 .japan-side h3 { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+#coverage-block { margin-top: 20px; }
+.note-line { color: var(--text-muted); font-size: 12px; margin: 6px 0 0; }
+.shindo { display: inline-block; min-width: 2.2em; padding: 1px 6px; border-radius: 6px; text-align: center;
+  font-weight: 650; font-variant-numeric: tabular-nums; background: var(--grid); }
+.shindo.strong { background: var(--warning); color: #0b0b0b; }
+.shindo.severe { background: var(--critical); color: #fff; }
 
 /* Pipeline health */
 .health h3 { font-size: 14px; font-weight: 600; margin: 0 0 10px; }

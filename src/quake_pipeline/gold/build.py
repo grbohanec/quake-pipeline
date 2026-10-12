@@ -32,6 +32,8 @@ DAILY_DAYS = 90
 STRONGEST_N = 10
 RUNS_SHOWN = 30
 JAPAN_BBOX = {"lat": (24, 46), "lon": (122, 150)}
+JAPAN_MAP_MIN_MAG = 2.0  # JMA locates thousands of tiny quakes a month; the map keeps the ones people notice
+FELT_SHOWN = 10
 
 
 def _rows(con: duckdb.DuckDBPyConnection, sql: str) -> tuple[list[str], list[list]]:
@@ -120,37 +122,34 @@ def build_tables(data_dir: Path, now: datetime) -> dict[str, dict]:
     )
     tables["strongest_this_year"] = {"columns": cols, "rows": rows, "year": year_start.year}
 
-    # Japan (the dashboard shows it once the JMA source is added).
-    (lat0, lat1), (lon0, lon1) = JAPAN_BBOX["lat"], JAPAN_BBOX["lon"]
-    cols, rows = _rows(
-        con,
-        f"""
-        SELECT {quake_cols} FROM q
-        WHERE event_time >= {_ts(now - timedelta(days=MAP_DAYS))}
-          AND latitude BETWEEN {lat0} AND {lat1} AND longitude BETWEEN {lon0} AND {lon1}
-        ORDER BY event_time
-    """,
-    )
-    tables["japan_quakes"] = {"columns": cols, "rows": rows}
+    tables |= _japan_tables(con, data_dir, now)
 
     # Pipeline health, from the quality check history (one Parquet file per run).
     dq_files = list((data_dir / "dq" / "results").glob("dq_*.parquet"))
     if dq_files:
         dq_glob = (data_dir / "dq" / "results" / "*.parquet").as_posix()
-        con.execute(f"CREATE VIEW dq AS SELECT * FROM read_parquet('{dq_glob}', union_by_name = true)")
+        con.execute(
+            f"CREATE VIEW dq AS SELECT *, coalesce(dataset, 'usgs') AS ds "
+            f"FROM read_parquet('{dq_glob}', union_by_name = true)"
+        )
+        # One square per pipeline run. A run checks each dataset separately; it counts as
+        # published only if every dataset passed. Older results have no dataset column (USGS only).
         cols, rows = _rows(
             con,
             f"""
             SELECT * FROM (
                 SELECT
-                    epoch_ms(run_at) AS run_at,
+                    epoch_ms(min(run_at)) AS run_at,
                     bool_and(passed OR severity = 'warn') AS published,
                     count(*) FILTER (WHERE NOT passed AND severity = 'error') AS errors,
                     count(*) FILTER (WHERE NOT passed AND severity = 'warn') AS warnings,
-                    max(value) FILTER (WHERE "check" = 'not empty') AS row_count,
-                    max(value) FILTER (WHERE "check" = 'data is fresh') AS hours_since_newest_event,
-                    coalesce(string_agg("check", ', ') FILTER (WHERE NOT passed), '') AS failed_checks
-                FROM dq GROUP BY run_at ORDER BY run_at DESC LIMIT {RUNS_SHOWN}
+                    max(value) FILTER (WHERE "check" = 'not empty' AND ds = 'usgs') AS row_count,
+                    max(value) FILTER (WHERE "check" = 'data is fresh' AND ds = 'usgs')
+                        AS hours_since_newest_event,
+                    coalesce(string_agg(
+                        CASE WHEN ds = 'usgs' THEN "check" ELSE upper(ds) || ': ' || "check" END, ', '
+                    ) FILTER (WHERE NOT passed), '') AS failed_checks
+                FROM dq GROUP BY run_id ORDER BY min(run_at) DESC LIMIT {RUNS_SHOWN}
             ) ORDER BY run_at
         """,
         )
@@ -158,11 +157,15 @@ def build_tables(data_dir: Path, now: datetime) -> dict[str, dict]:
         cols, rows = _rows(
             con,
             """
-            SELECT "check", severity, passed, observed, expected FROM dq
-            WHERE run_at = (SELECT max(run_at) FROM dq)
+            SELECT CASE WHEN ds = 'usgs' THEN "check" ELSE upper(ds) || ': ' || "check" END AS "check",
+                   severity, passed, observed, expected
+            FROM dq WHERE run_id = (SELECT arg_max(run_id, run_at) FROM dq)
+            ORDER BY ds DESC
         """,
         )
-        latest = con.execute("SELECT epoch_ms(max(run_at)) FROM dq").fetchone()[0]
+        latest = con.execute(
+            "SELECT epoch_ms(min(run_at)) FROM dq WHERE run_id = (SELECT arg_max(run_id, run_at) FROM dq)"
+        ).fetchone()[0]
         tables["latest_checks"] = {
             "columns": cols,
             "rows": rows,
@@ -170,6 +173,98 @@ def build_tables(data_dir: Path, now: datetime) -> dict[str, dict]:
             "checks": [dict(zip(cols, r, strict=True)) for r in rows],
         }
     con.close()
+    return tables
+
+
+def _japan_tables(con: duckdb.DuckDBPyConnection, data_dir: Path, now: datetime) -> dict[str, dict]:
+    """The Japan section, from JMA. Falls back to USGS (and the page hides the section) until JMA exists."""
+    (lat0, lat1), (lon0, lon1) = JAPAN_BBOX["lat"], JAPAN_BBOX["lon"]
+    in_japan = f"latitude BETWEEN {lat0} AND {lat1} AND longitude BETWEEN {lon0} AND {lon1}"
+    since = _ts(now - timedelta(days=MAP_DAYS))
+    jma_dir = data_dir / "clean" / "jma"
+    if not any(jma_dir.glob("year=*/*.parquet")):
+        cols, rows = _rows(
+            con,
+            f"""
+            SELECT epoch_ms(event_time) AS time, round(latitude, 3) AS lat, round(longitude, 3) AS lon,
+                   round(depth_km, 1) AS depth, mag, place, event_id AS id
+            FROM q WHERE event_time >= {since} AND {in_japan} ORDER BY event_time
+        """,
+        )
+        return {"japan_quakes": {"columns": cols, "rows": rows, "source": "usgs"}}
+
+    con.execute(
+        f"CREATE VIEW jma AS SELECT * FROM read_parquet('{(jma_dir / '**' / '*.parquet').as_posix()}', "
+        "hive_partitioning = true)"
+    )
+    tables: dict[str, dict] = {}
+
+    # Map and tiles: located earthquakes near Japan in the last 30 days. Daily lists
+    # run two days behind, so the window ends at the newest day JMA has published.
+    total, usgs_total, newest = con.execute(f"""
+        SELECT
+            (SELECT count(*) FROM jma
+             WHERE event_time >= {since} AND {in_japan} AND event_type = 'earthquake'),
+            (SELECT count(*) FROM q WHERE event_time >= {since} AND {in_japan}),
+            (SELECT epoch_ms(max(event_time)) FROM jma)
+    """).fetchone()
+    cols, rows = _rows(
+        con,
+        f"""
+        SELECT epoch_ms(event_time) AS time, round(latitude, 3) AS lat, round(longitude, 3) AS lon,
+               round(depth_km, 1) AS depth, mag, coalesce(region_en, region) AS place, event_id AS id
+        FROM jma
+        WHERE event_time >= {since} AND {in_japan} AND event_type = 'earthquake'
+          AND mag >= {JAPAN_MAP_MIN_MAG}
+        ORDER BY event_time
+    """,
+    )
+    tables["japan_quakes"] = {
+        "columns": cols,
+        "rows": rows,
+        "source": "jma",
+        "min_mag": JAPAN_MAP_MIN_MAG,
+        "located_total": total,  # every magnitude, including those too small to map
+        "usgs_total": usgs_total,  # USGS's count for the same area and days, for comparison
+        "newest": newest,
+    }
+
+    # Recent felt earthquakes, with shindo, from the near-real-time feed.
+    felt_dir = data_dir / "clean" / "jma_felt"
+    cols, rows = ["time", "lat", "lon", "depth", "mag", "shindo", "place", "id"], []
+    if any(felt_dir.glob("year=*/*.parquet")):
+        cols, rows = _rows(
+            con,
+            f"""
+            SELECT epoch_ms(event_time) AS time, latitude AS lat, longitude AS lon, depth_km AS depth, mag,
+                   max_intensity AS shindo, coalesce(region_en, region) AS place, report_id AS id
+            FROM read_parquet('{(felt_dir / "**" / "*.parquet").as_posix()}', hive_partitioning = true)
+            ORDER BY event_time DESC LIMIT {FELT_SHOWN}
+        """,
+        )
+    tables["japan_felt"] = {"columns": cols, "rows": rows}
+
+    # Why a second source: share of JMA's quakes around Japan that USGS also has,
+    # and how the magnitudes compare, by magnitude band (since 2000).
+    matches = data_dir / "clean" / "jma_usgs_matches" / "matches.parquet"
+    if matches.exists():
+        cols, rows = _rows(
+            con,
+            f"""
+            WITH j AS (
+                SELECT event_id, floor(mag) AS band FROM jma
+                WHERE event_time >= TIMESTAMPTZ '2000-01-01' AND {in_japan}
+                  AND event_type = 'earthquake' AND mag >= 0
+            )
+            SELECT CAST(least(band, 6) AS INT) AS band,
+                   count(*) AS jma_quakes,
+                   count(m.jma_event_id) AS in_usgs,
+                   round(median(m.mag_diff), 2) AS median_mag_diff
+            FROM j LEFT JOIN read_parquet('{matches.as_posix()}') m ON m.jma_event_id = j.event_id
+            GROUP BY 1 ORDER BY 1
+        """,
+        )
+        tables["jma_usgs_coverage"] = {"columns": cols, "rows": rows}
     return tables
 
 

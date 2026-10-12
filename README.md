@@ -3,9 +3,9 @@
 [![CI](https://github.com/grbohanec/quake-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/grbohanec/quake-pipeline/actions/workflows/ci.yml)
 [![Daily refresh](https://github.com/grbohanec/quake-pipeline/actions/workflows/daily-refresh.yml/badge.svg)](https://github.com/grbohanec/quake-pipeline/actions/workflows/daily-refresh.yml)
 
-An automated data pipeline that pulls every M2.0+ earthquake since 1880 from the [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/) (about 1.55 million events), cleans it into partitioned Parquet on S3, and refreshes itself every morning. Each day's build must pass 14 data quality checks before it is published, so a bad run never reaches the queryable data. The full history is queryable with SQL in Amazon Athena, for a few cents a month, and a [live dashboard](https://grbohanec.github.io/quake-pipeline/) is rebuilt from it every morning.
+An automated data pipeline that pulls every M2.0+ earthquake since 1880 from the [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/) (about 1.55 million events), plus every earthquake the [Japan Meteorological Agency](https://www.data.jma.go.jp/eqev/data/bulletin/hypo.html) (JMA) has located since 1919, cleans them into partitioned Parquet on S3, and refreshes itself every morning. The two sources are linked, so each Japanese quake can be traced to its USGS record. Each day's build must pass 14 data quality checks before it is published, so a bad run never reaches the queryable data. The full history is queryable with SQL in Amazon Athena, for a few cents a month, and a [live dashboard](https://grbohanec.github.io/quake-pipeline/) is rebuilt from it every morning.
 
-**[→ Live dashboard](https://grbohanec.github.io/quake-pipeline/)**: recent earthquakes on a map of tectonic plate boundaries, daily trends, the year's strongest quakes, and the pipeline's own health.
+**[→ Live dashboard](https://grbohanec.github.io/quake-pipeline/)**: recent earthquakes on a map of tectonic plate boundaries, daily trends, the year's strongest quakes, a Japan section from JMA data (with shindo, the felt-shaking scale), and the pipeline's own health.
 
 This is the rebuilt version of my [Earthquake Severity Prediction Project](https://github.com/grbohanec/Earthquake-Severity-Prediction-Project). That was a one-time Spark notebook on 51 hand-downloaded CSVs that stopped at June 2024; this one ingests automatically and stays current.
 
@@ -14,9 +14,12 @@ This is the rebuilt version of my [Earthquake Severity Prediction Project](https
 ```mermaid
 flowchart LR
     usgs[USGS Event API] -->|new + revised events| ingest
+    jma[JMA catalog,<br/>daily lists, feed] --> ingestj
 
     subgraph gha [GitHub Actions, daily 06:17 JST]
         ingest[Ingest<br/>Python] --> clean[Clean<br/>DuckDB] --> dq{Quality<br/>checks}
+        ingestj[Ingest JMA] --> cleanj[Clean JMA<br/>+ link to USGS] --> dqj{JMA<br/>checks}
+        clean --> cleanj
     end
 
     subgraph s3 [S3 bucket]
@@ -29,6 +32,7 @@ flowchart LR
     ingest <-->|sync| raw
     ingest <-->|watermark| state
     dq -->|pass: publish| cleaned
+    dqj -->|pass: publish| cleaned
     dq -.->|fail: alert, keep last good build| alert[Email / Slack]
     dq -->|results| dqres[(data/dq)]
     cleaned --> athena[Athena SQL]
@@ -42,6 +46,8 @@ flowchart LR
 3. **Quality checks** audit the new build. Only a build that passes is published; a failure stops the run and sends an alert.
 4. **Athena** queries the clean Parquet files in place, plus the history of every quality check.
 5. **Gold** builds small summary tables from the published data, and the **dashboard** on GitHub Pages is redeployed with them.
+
+JMA goes through the same ingest, clean, check and publish steps separately, so a problem with one source never stops the other from updating.
 
 ## Example
 
@@ -111,6 +117,30 @@ Reads every raw file and writes `data/clean/usgs/year=YYYY/`:
 - **Validation:** rows missing a time, location or magnitude, or with impossible values, are dropped and counted.
 - **Safe rebuilds:** built in a temporary folder and swapped in only when complete.
 
+### JMA (Japan)
+
+JMA locates far more small Japanese earthquakes than USGS, but publishes them in three forms, which the pipeline stitches into one history:
+
+| Source | Period | Status | Format |
+| --- | --- | --- | --- |
+| [Hypocenter catalog](https://www.data.jma.go.jp/eqev/data/bulletin/hypo.html) | 1919 to the last published year | final, reviewed | yearly zips of [fixed-width text](https://www.data.jma.go.jp/eqev/data/bulletin/data/format/hypfmt_e.html) |
+| [Daily hypocenter lists](https://www.data.jma.go.jp/eqev/data/daily_map/index.html) | after the catalog, to 2 days ago | preliminary | one HTML page per day |
+| Felt-earthquake feed | last ~10 days | near real time | JSON, with shindo |
+
+*Shindo* (震度, seismic intensity) is JMA's 1 to 7 scale for how strongly shaking was felt, which USGS doesn't provide.
+
+```bash
+quake-ingest-jma --catalog --daily --feed   # downloads only what is new or changed
+quake-clean-jma                              # -> data/clean/jma/ and data/clean/jma_felt/
+quake-match                                  # -> data/clean/jma_usgs_matches/
+quake-dq --dataset jma
+```
+
+- **Catalog wins.** For every year the catalog covers, its final rows are used; daily lists fill the days after. When JMA publishes the next catalog year, it replaces that year's preliminary rows on the next rebuild with no code change.
+- **Fixed-width parsing** follows JMA's spec, including implied decimals (`1234` = 12.34) and coded negative magnitudes (`A5` = −1.5). All times are converted from Japan time with a fixed +9 hours, since the catalog ignores Japan's 1948–51 daylight saving time.
+- **English place names.** Daily lists only have Japanese region names, so each quake takes the catalog's most common English name for its ~10 km map cell (or a neighbouring cell).
+- **Linking to USGS.** The agencies share no id, so `quake-match` pairs records whose times are within 16 s and epicenters within 100 km, keeping a pair only if each is the other's closest match. That makes cross-source questions answerable, such as how much of Japan's activity USGS sees, and how JMA's magnitude scale (Mj) compares with USGS's for the same quakes.
+
 ### Data quality
 
 ```bash
@@ -132,6 +162,15 @@ Audits the clean layer and exits with code 1 if any error-level check fails, whi
 | Depth plausible; `updated_at` not before `event_time` | warn | odd but possible values, reported only |
 
 **Known issues.** Some source records are odd but genuine, such as a USGS record whose `updated_at` is earlier than its `event_time`. After review, a record is listed in [`quality/known_issues.csv`](quality/known_issues.csv) with the reason and date, and the row-level checks skip it, so a warning means something *new*. If a listed record stops failing (fixed upstream), a `known issues still apply` warning says to remove it, so the list never goes stale. Changes to the list go through a pull request like any code change.
+
+**JMA checks** (`--dataset jma`) use the same checks adapted to its schema (magnitude may be missing for tiny quakes; freshness allows the 2-day publishing lag), plus:
+
+| Check | Severity | Catches |
+| --- | --- | --- |
+| No missing days in the daily lists, counted from the end of the catalog | error | a page that failed to download or parse; a gap between the catalog and the daily lists |
+| Shindo values are real JMA levels; status is final or preliminary | error | a parsing bug |
+| Felt-earthquake reports unique; feed fresh (< 72h) | error / warn | a broken feed snapshot |
+| M5+ JMA quakes near Japan are also in USGS (≥ 90%) | warn | the two sources or the matching drifting apart |
 
 Thresholds are options: `--freshness-hours`, `--max-volume-drop`, `--max-drop-rate`. The last good run's row count is kept in `data/state/quality.json` and only moves forward when a run passes.
 
@@ -156,6 +195,8 @@ The dashboard ([`site/`](site/)) is a static page: plain HTML, CSS and JavaScrip
 
 [`daily-refresh.yml`](.github/workflows/daily-refresh.yml) runs every day at 06:17 Tokyo time, and on demand from the Actions tab. It downloads `data/raw` and `data/state` from S3, runs an incremental ingest, rebuilds the clean layer, runs the quality checks, and publishes the clean layer to S3 only if they pass (write, audit, publish). It then builds the gold tables and redeploys the dashboard to GitHub Pages, so the page only ever shows data that passed the checks.
 
+**JMA** runs in the same workflow after USGS is published. Its steps can fail without stopping USGS or the dashboard: a failed JMA build isn't published, the dashboard uses the last good JMA copy from S3, and the run is still marked failed so the alert fires. JMA is set up once by running the **JMA backfill** workflow ([`jma-backfill.yml`](.github/workflows/jma-backfill.yml)) from the Actions tab; until then the daily run skips it.
+
 **Alerts:** GitHub emails the workflow owner when a scheduled run fails. For a chat alert too, add a Slack or Discord incoming-webhook URL as the secret `ALERT_WEBHOOK_URL`; the message says whether the quality checks failed or the pipeline errored, and links to the run.
 
 **Authentication** uses one of:
@@ -165,7 +206,7 @@ The dashboard ([`site/`](site/)) is a static page: plain HTML, CSS and JavaScrip
 
 The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override them with repository variables `S3_BUCKET` and `AWS_REGION`.
 
-**Athena:** run [`sql/athena/create_tables.sql`](sql/athena/create_tables.sql) once. It creates `quakes.usgs_events`, which uses partition projection so new years appear automatically with no Glue crawler, `quakes.dq_results`, the history of quality checks (one row per check per run), and the view `quakes.dq_runs`, which pivots that history to one row per run.
+**Athena:** run [`sql/athena/create_tables.sql`](sql/athena/create_tables.sql) once. It creates `quakes.usgs_events` and the JMA tables `quakes.jma_events`, `quakes.jma_felt` and `quakes.jma_usgs_matches`. `quakes.usgs_events` uses partition projection so new years appear automatically with no Glue crawler, `quakes.dq_results`, the history of quality checks (one row per check per run), and the view `quakes.dq_runs`, which pivots that history to one row per run.
 
 ## Design decisions
 
@@ -184,6 +225,10 @@ The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override
 | Known issues acknowledged in a reviewed file | Silencing a check entirely would hide new problems; acknowledging specific records keeps the check sharp, and the file is an audit trail of every exception and why. |
 | Gold tables precomputed daily | The page loads a few hundred KB of JSON instead of querying 1.5M rows; the same tables are Parquet in S3 for anyone using Athena. |
 | Static dashboard on GitHub Pages, not a BI tool | Free, no server or credentials to manage, and it deploys from the same workflow that builds the data. A BI tool (QuickSight, Looker) would fit when many people need ad-hoc filtering. |
+| JMA kept as its own dataset, linked to USGS rather than merged | The agencies disagree on time, place and magnitude for the same quake; merging would mean picking a winner and losing information. A link table keeps both versions and makes the disagreement measurable. |
+| Matching on time and distance, mutual best only | No shared key exists. Requiring each record to be the other's closest candidate stops an aftershock from being linked to its mainshock's record. |
+| Each source audited and published separately | One source being down (JMA's site, say) shouldn't block the other; the dashboard falls back to the last good copy of whichever failed. |
+| Neighbour-cell lookup written as nine equality keys | A range join on two columns couldn't use a hash join; rewriting it cut the JMA rebuild from ~2 minutes to ~30 seconds on 4 million rows. |
 | Volume check against the last *good* run | Comparing with yesterday would let a slow leak of a few rows a day pass every check. |
 
 ## Project layout
@@ -191,13 +236,16 @@ The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override
 ```
 src/quake_pipeline/
   ingest/usgs.py          USGS API -> raw layer
-  transform/clean.py      raw layer -> clean layer
+  ingest/jma.py           JMA catalog, daily lists and feed -> raw layer
+  transform/clean.py      raw layer -> clean layer (USGS)
+  transform/clean_jma.py  raw layer -> clean layer (JMA), stitching its three sources
+  transform/match.py      links JMA earthquakes to the same USGS earthquakes
   quality/checks.py       quality checks that gate publishing
   gold/build.py           clean layer -> gold tables for the dashboard
 site/                     the dashboard (static HTML/CSS/JS + map layers)
 scripts/build_basemap.py  builds the dashboard's land and plate-boundary layers
 quality/known_issues.csv  reviewed exceptions to the row-level checks
-tests/                    unit tests, mirroring src/ (offline, fake USGS API)
+tests/                    unit tests, mirroring src/ (offline, fake USGS and JMA sources)
 sql/athena/               table definition and example queries
 .github/workflows/
   ci.yml                  lint + tests on every push
