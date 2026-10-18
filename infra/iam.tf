@@ -31,7 +31,7 @@ data "aws_iam_policy_document" "github_data_access" {
 }
 
 resource "aws_iam_user_policy" "github_data_access" {
-  name   = "quake-pipeline-data-access"
+  name   = "quake-pipeline-s3"
   user   = aws_iam_user.github.name
   policy = data.aws_iam_policy_document.github_data_access.json
 }

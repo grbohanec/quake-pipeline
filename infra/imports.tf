@@ -3,8 +3,7 @@
 # the first apply, with no downtime and nothing recreated. Once applied they
 # are no-ops; they stay as a record of what existed before Terraform.
 #
-# New in Terraform: the lifecycle rules, the Athena workgroup, and the
-# pipeline user's inline policy (replacing the one made by hand).
+# New in Terraform: the lifecycle rules and the Athena workgroup.
 
 data "aws_caller_identity" "current" {}
 
@@ -32,6 +31,11 @@ import {
 import {
   to = aws_iam_user.github
   id = var.github_user_name
+}
+
+import {
+  to = aws_iam_user_policy.github_data_access
+  id = "${var.github_user_name}:quake-pipeline-s3"
 }
 
 # Created by CREATE DATABASE in sql/athena/create_tables.sql.
