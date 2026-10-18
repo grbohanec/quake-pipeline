@@ -34,3 +34,24 @@ jobs:
 
       - name: Test
         run: pytest -q
+
+  docker:
+    # Builds the container image and checks every pipeline command starts in it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -t quake-pipeline .
+
+      - name: Smoke test
+        run: |
+          for cmd in quake-ingest-usgs quake-ingest-jma quake-clean quake-clean-jma \
+                     quake-match quake-dq quake-gold; do
+            docker run --rm quake-pipeline "$cmd" --help > /dev/null
+            echo "ok: $cmd"
+          done
+          test "$(docker run --rm quake-pipeline whoami)" = pipeline  # not root
+
+      - name: Image size
+        run: docker image ls quake-pipeline --format '{{.Size}}' >> "$GITHUB_STEP_SUMMARY"

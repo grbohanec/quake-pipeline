@@ -93,6 +93,18 @@ quake-gold --site-dir site/data
 python -m http.server -d site 8000   # then open http://localhost:8000
 ```
 
+### With Docker
+
+Every step also runs in a container, with nothing but Docker installed:
+
+```bash
+docker build -t quake-pipeline .
+docker run --rm -v "$PWD/data:/app/data" quake-pipeline quake-ingest-usgs --backfill --start 2026-09-01
+docker run --rm -v "$PWD/data:/app/data" quake-pipeline quake-clean
+```
+
+The image is built in two stages, so it holds only the installed package and no build tools, and it runs as a non-root user. CI builds it on every push and checks that each command starts.
+
 ## Usage
 
 ### Ingest
@@ -217,6 +229,7 @@ The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override
 | Full rebuild of the clean layer | Seconds at this size and always correct. At scale: Iceberg or Delta Lake with `MERGE`. |
 | Partition by year, not month | Early decades have few events; monthly folders would create thousands of tiny files. |
 | GitHub Actions, not Airflow | One daily job doesn't justify an orchestrator. |
+| Container image for every step | The same image runs locally, in CI, or on AWS Batch / ECS, so moving the job off GitHub Actions needs no code change. The daily job still installs with pip, which is faster on a fresh runner than pulling an image. |
 | Timestamps in UTC | Converted only for display, avoiding time-zone bugs. |
 | Write, audit, publish | A bad build is caught before Athena sees it; readers keep the last good data instead of wrong data. |
 | Checks in plain SQL, not Great Expectations | 14 checks over one table fit in one readable file with no extra framework. Great Expectations or dbt tests would pay off with many tables. |
@@ -247,8 +260,9 @@ scripts/build_basemap.py  builds the dashboard's land and plate-boundary layers
 quality/known_issues.csv  reviewed exceptions to the row-level checks
 tests/                    unit tests, mirroring src/ (offline, fake USGS and JMA sources)
 sql/athena/               table definition and example queries
+Dockerfile                container image that runs any pipeline step
 .github/workflows/
-  ci.yml                  lint + tests on every push
+  ci.yml                  lint + tests + Docker build on every push
   daily-refresh.yml       scheduled pipeline run (write -> audit -> publish -> dashboard)
 ```
 
