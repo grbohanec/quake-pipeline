@@ -1,4 +1,5 @@
-# Weekly pull requests to keep Python packages and GitHub Actions up to date.
+# Weekly pull requests to keep Python packages, GitHub Actions and the
+# Docker base image up to date.
 version: 2
 updates:
   - package-ecosystem: pip
@@ -6,6 +7,10 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly

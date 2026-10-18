@@ -1,0 +1,15 @@
+# Keep the build context small: only pyproject, src/ and quality/ are needed.
+.git/
+.github/
+.venv/
+data/
+site/
+scripts/
+sql/
+tests/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
