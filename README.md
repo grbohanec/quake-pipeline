@@ -3,7 +3,7 @@
 [![CI](https://github.com/grbohanec/quake-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/grbohanec/quake-pipeline/actions/workflows/ci.yml)
 [![Daily refresh](https://github.com/grbohanec/quake-pipeline/actions/workflows/daily-refresh.yml/badge.svg)](https://github.com/grbohanec/quake-pipeline/actions/workflows/daily-refresh.yml)
 
-An automated data pipeline that pulls every M2.0+ earthquake since 1880 from the [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/) (about 1.55 million events), plus every earthquake the [Japan Meteorological Agency](https://www.data.jma.go.jp/eqev/data/bulletin/hypo.html) (JMA) has located since 1919, cleans them into partitioned Parquet on S3, and refreshes itself every morning. The two sources are linked, so each Japanese quake can be traced to its USGS record. Each day's build must pass 14 data quality checks before it is published, so a bad run never reaches the queryable data. The full history is queryable with SQL in Amazon Athena, for a few cents a month, and a [live dashboard](https://grbohanec.github.io/quake-pipeline/) is rebuilt from it every morning.
+An automated data pipeline that pulls every M2.0+ earthquake since 1880 from the [USGS Earthquake API](https://earthquake.usgs.gov/fdsnws/event/1/) (about 1.55 million events), plus every earthquake the [Japan Meteorological Agency](https://www.data.jma.go.jp/eqev/data/bulletin/hypo.html) (JMA) has located since 1919, cleans them into partitioned Parquet on S3, and refreshes itself every morning. The two sources are linked, so each Japanese quake can be traced to its USGS record. Each day's build must pass 14 data quality checks before it is published, so a bad run never reaches the queryable data. The full history is queryable with SQL in Amazon Athena, for a few cents a month, and a [live dashboard](https://grbohanec.github.io/quake-pipeline/) is rebuilt from it every morning. The AWS infrastructure is defined in Terraform, and every step also runs in a Docker container.
 
 **[→ Live dashboard](https://grbohanec.github.io/quake-pipeline/)**: recent earthquakes on a map of tectonic plate boundaries, daily trends, the year's strongest quakes, a Japan section from JMA data (with shindo, the felt-shaking scale), and the pipeline's own health.
 
@@ -218,7 +218,7 @@ The dashboard ([`site/`](site/)) is a static page: plain HTML, CSS and JavaScrip
 
 The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override them with repository variables `S3_BUCKET` and `AWS_REGION`.
 
-**Athena:** run [`sql/athena/create_tables.sql`](sql/athena/create_tables.sql) once. It creates `quakes.usgs_events` and the JMA tables `quakes.jma_events`, `quakes.jma_felt` and `quakes.jma_usgs_matches`. `quakes.usgs_events` uses partition projection so new years appear automatically with no Glue crawler, `quakes.dq_results`, the history of quality checks (one row per check per run), and the view `quakes.dq_runs`, which pivots that history to one row per run.
+**Athena:** run [`sql/athena/create_tables.sql`](sql/athena/create_tables.sql) once, in the `quakes` workgroup (created by Terraform, so the scan limit applies). It creates `quakes.usgs_events` and the JMA tables `quakes.jma_events`, `quakes.jma_felt` and `quakes.jma_usgs_matches`. `quakes.usgs_events` uses partition projection so new years appear automatically with no Glue crawler, `quakes.dq_results`, the history of quality checks (one row per check per run), and the view `quakes.dq_runs`, which pivots that history to one row per run.
 
 ### Infrastructure as code (Terraform)
 
@@ -297,6 +297,8 @@ Dockerfile                container image that runs any pipeline step
 - [x] JMA source for small earthquakes in Japan, linked to USGS
 - [ ] Severity model rebuilt on the clean layer
 - [x] Dashboard on GitHub Pages, with a Japan section from JMA
+- [x] Container image for every step
+- [x] AWS infrastructure in Terraform, with cost guardrails
 
 ## License
 
