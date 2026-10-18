@@ -35,6 +35,26 @@ jobs:
       - name: Test
         run: pytest -q
 
+  terraform:
+    # Formatting and validation only. Plans and applies need AWS admin
+    # credentials and are run by hand from infra/ (see README).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Format
+        run: terraform fmt -check -recursive
+
+      - name: Validate
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
   docker:
     # Builds the container image and checks every pipeline command starts in it.
     runs-on: ubuntu-latest
