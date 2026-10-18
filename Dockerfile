@@ -5,7 +5,7 @@
 #   docker run --rm -v "$PWD/data:/app/data" quake-pipeline quake-ingest-usgs --incremental
 
 # --- Build stage: build the package as a wheel -----------------------------
-FROM python:3.12-slim AS build
+FROM python:3.14-slim AS build
 
 WORKDIR /src
 COPY pyproject.toml README.md LICENSE ./
@@ -13,7 +13,7 @@ COPY src/ src/
 RUN pip wheel --no-cache-dir --wheel-dir /wheels .
 
 # --- Runtime stage: only the installed package, no build tools -------------
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
