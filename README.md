@@ -220,6 +220,24 @@ The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override
 
 **Athena:** run [`sql/athena/create_tables.sql`](sql/athena/create_tables.sql) once. It creates `quakes.usgs_events` and the JMA tables `quakes.jma_events`, `quakes.jma_felt` and `quakes.jma_usgs_matches`. `quakes.usgs_events` uses partition projection so new years appear automatically with no Glue crawler, `quakes.dq_results`, the history of quality checks (one row per check per run), and the view `quakes.dq_runs`, which pivots that history to one row per run.
 
+### Infrastructure as code (Terraform)
+
+The AWS side is defined in [`infra/`](infra/): the S3 bucket and its settings, the pipeline's IAM user and its least-privilege policy, the Glue database, and an Athena workgroup. Terraform state is kept in the same bucket under `tfstate/`, out of reach of the pipeline's own credentials, with S3's native lock file so two applies can't overlap.
+
+Cost guardrails it adds:
+
+- Athena query results expire after 7 days, and interrupted uploads are cleaned up after 1 day.
+- The `quakes` workgroup cancels any single query that would scan more than 1 GB (the full history is about 100 MB).
+
+```bash
+cd infra
+terraform init
+terraform plan    # review before applying
+terraform apply
+```
+
+This needs AWS credentials with admin rights; the pipeline's own key can't (and shouldn't) change infrastructure. CI checks formatting and validity on every push. The bucket, user and database were first created by hand, so [`infra/imports.tf`](infra/imports.tf) adopts them into state on the first apply rather than recreating them. The access key itself is never created by Terraform, so it never appears in state.
+
 ## Design decisions
 
 | Decision | Why |
@@ -229,6 +247,9 @@ The bucket and region default to `gabe-quake-pipeline` and `us-east-2`; override
 | Full rebuild of the clean layer | Seconds at this size and always correct. At scale: Iceberg or Delta Lake with `MERGE`. |
 | Partition by year, not month | Early decades have few events; monthly folders would create thousands of tiny files. |
 | GitHub Actions, not Airflow | One daily job doesn't justify an orchestrator. |
+| Terraform, adopting what existed | Infrastructure first built by hand in the console is reviewable, repeatable and rebuildable once it's in code; `import` blocks bring it in without recreating anything. |
+| Table schemas in SQL, not Terraform | Terraform owns the database and the resources around it; the tables stay in `create_tables.sql`, next to the queries that use them and readable as plain DDL. |
+| Per-query scan limit on Athena | Athena bills by data scanned, so a cap turns a runaway query into an error instead of a bill. |
 | Container image for every step | The same image runs locally, in CI, or on AWS Batch / ECS, so moving the job off GitHub Actions needs no code change. The daily job still installs with pip, which is faster on a fresh runner than pulling an image. |
 | Timestamps in UTC | Converted only for display, avoiding time-zone bugs. |
 | Write, audit, publish | A bad build is caught before Athena sees it; readers keep the last good data instead of wrong data. |
@@ -260,6 +281,7 @@ scripts/build_basemap.py  builds the dashboard's land and plate-boundary layers
 quality/known_issues.csv  reviewed exceptions to the row-level checks
 tests/                    unit tests, mirroring src/ (offline, fake USGS and JMA sources)
 sql/athena/               table definition and example queries
+infra/                    Terraform for the AWS resources (S3, IAM, Glue, Athena)
 Dockerfile                container image that runs any pipeline step
 .github/workflows/
   ci.yml                  lint + tests + Docker build on every push
