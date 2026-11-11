@@ -22,7 +22,11 @@ def read(data_dir: Path, table: str = "jma") -> list[dict]:
     con.execute("SET TimeZone = 'UTC'")
     glob = (data_dir / "clean" / table / "**" / "*.parquet").as_posix()
     sql = f"SELECT * FROM read_parquet('{glob}', hive_partitioning = true) ORDER BY event_time"
-    table = con.execute(sql).arrow()  # via Arrow: timestamps come back without needing pytz
+    result = con.execute(sql)
+    # via Arrow: timestamps come back without needing pytz.
+    # DuckDB 2.0 renamed .arrow() to .to_arrow_table(); support both.
+    to_arrow = getattr(result, "to_arrow_table", None) or result.arrow
+    table = to_arrow()
     return (table.read_all() if hasattr(table, "read_all") else table).to_pylist()
 
 
