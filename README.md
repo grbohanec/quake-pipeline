@@ -192,9 +192,9 @@ Thresholds are options: `--freshness-hours`, `--max-volume-drop`, `--max-drop-ra
 quake-gold --site-dir site/data
 ```
 
-Builds one small table per dashboard question from the clean layer and the quality check history: headline numbers, M2.5+ quakes from the last 30 days, quakes per day over 90 complete days (quiet days included as 0, so an outage shows as a dip), the year's strongest quakes, the last 30 pipeline runs, and for the Japan section: JMA's quakes near Japan in the last 30 days, recent felt quakes with shindo, and how many of JMA's quakes USGS also has, by magnitude. Each is written as Parquet to `data/gold/` (for Athena) and, with `--site-dir`, as JSON for the page.
+Builds one small table per dashboard question from the clean layer and the quality check history: headline numbers, M2.5+ quakes from the last 30 days, quakes per day over 90 complete days (quiet days included as 0, so an outage shows as a dip), the year's strongest quakes, the last 30 pipeline runs, and for the Japan section: JMA's quakes near Japan in the last 30 days, recent felt quakes with shindo, the felt quakes with the strongest shaking in the last 30 days (ranked by shindo, then magnitude), and how many of JMA's quakes USGS also has, by magnitude. Each is written as Parquet to `data/gold/` (for Athena) and, with `--site-dir`, as JSON for the page.
 
-The dashboard ([`site/`](site/)) is a static page: plain HTML, CSS and JavaScript, with [Leaflet](https://leafletjs.com/) for the maps. Quakes are colored and sized by magnitude on both maps. Plate boundaries come from the PB2002 model (Bird, 2003), grouped into subduction, other convergent, divergent and transform; [`scripts/build_basemap.py`](scripts/build_basemap.py) rebuilds the committed map layers.
+The dashboard ([`site/`](site/)) is a static page: plain HTML, CSS and JavaScript, with [Leaflet](https://leafletjs.com/) for the maps. Quakes are sized by magnitude on both maps and colored by magnitude, or on the Japan map optionally by depth, which shows the Pacific plate deepening as it dives west under Japan. Plate boundaries come from the PB2002 model (Bird, 2003), grouped into subduction, other convergent, divergent and transform; [`scripts/build_basemap.py`](scripts/build_basemap.py) rebuilds the committed map layers.
 
 ## How it works
 

@@ -94,6 +94,17 @@ const MAG_BANDS = [
 const magBand = (m) => MAG_BANDS.find((b) => m < b.max);
 const magColor = (m) => css(magBand(m).token);
 
+// Depth bands for the Japan map: one blue hue, light (shallow) to dark (deep), kept apart from
+// the purple magnitude scale. Shallow crustal quakes (under 30 km) do the most damage; quakes
+// below 70 km are inside the plate diving under Japan.
+const DEPTH_BANDS = [
+  { max: 30, label: "0–30 km", token: "--depth-1" },
+  { max: 70, label: "30–70 km", token: "--depth-2" },
+  { max: 300, label: "70–300 km", token: "--depth-3" },
+  { max: Infinity, label: "300+ km", token: "--depth-4" },
+];
+const depthColor = (d) => (d == null ? css("--text-muted") : css(DEPTH_BANDS.find((b) => d < b.max).token));
+
 function drawMagLegend(id, bands = MAG_BANDS) {
   const box = document.getElementById(id);
   const title = document.createElement("span");
@@ -387,7 +398,7 @@ function buildJapanMap(land, plates, quakes) {
   // Biggest first, so small quakes are drawn on top and stay hoverable.
   const sorted = [...quakes].sort((a, b) => b.mag - a.mag);
   const markers = sorted.map((q) =>
-    L.circleMarker([q.lat, q.lon], { radius: radius(q.mag, 1.15), weight: 1, mag: q.mag })
+    L.circleMarker([q.lat, q.lon], { radius: radius(q.mag, 1.15), weight: 1, mag: q.mag, depth: q.depth })
       .bindTooltip(() => tooltipNode(q), { direction: "top", offset: [0, -4] })
       .addTo(map),
   );
@@ -400,17 +411,68 @@ function buildJapanMap(land, plates, quakes) {
       opacity: 0.8,
       lineCap: "round",
     }));
+    // Size always shows magnitude; colour shows magnitude or depth, chosen with the toggle.
+    const fill = colorBy === "depth" ? (o) => depthColor(o.depth) : (o) => magColor(o.mag);
     for (const m of markers) {
-      m.setStyle({ color: css("--surface"), fillColor: magColor(m.options.mag), fillOpacity: 0.85, opacity: 0.9 });
+      m.setStyle({ color: css("--surface"), fillColor: fill(m.options), fillOpacity: 0.85, opacity: 0.9 });
     }
   }
+  let colorBy = "mag";
   applyTheme();
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+
+  return (mode) => {
+    colorBy = mode;
+    applyTheme();
+  };
 }
 
-function drawJapanLegend() {
-  // The Japan map shows M2+, so its smallest band starts at 2.
-  drawMagLegend("japan-legend", [{ ...MAG_BANDS[0], label: "2–3" }, ...MAG_BANDS.slice(1)]);
+function setupColorToggle(setColorBy) {
+  const buttons = document.querySelectorAll("[data-color-by]");
+  const mapEl = document.getElementById("japan-map");
+  for (const b of buttons) {
+    b.addEventListener("click", () => {
+      const mode = b.dataset.colorBy;
+      for (const other of buttons) other.setAttribute("aria-pressed", String(other === b));
+      setColorBy(mode);
+      drawJapanLegend(mode);
+      mapEl.setAttribute(
+        "aria-label",
+        `Map of earthquakes around Japan in the last 30 days, coloured by ${mode === "depth" ? "depth" : "magnitude"}`,
+      );
+    });
+  }
+}
+
+function drawDepthLegend(id) {
+  const box = document.getElementById(id);
+  const title = document.createElement("span");
+  title.textContent = "Depth";
+  box.append(title);
+  for (const b of DEPTH_BANDS) {
+    const item = document.createElement("span");
+    item.className = "item";
+    const d = document.createElement("span");
+    d.className = "dot";
+    d.style.width = d.style.height = "10px";
+    d.style.background = `var(${b.token})`;
+    item.append(d, document.createTextNode(b.label));
+    box.append(item);
+  }
+  const size = document.createElement("span");
+  size.className = "item muted";
+  size.textContent = "Size shows magnitude";
+  box.append(size);
+}
+
+function drawJapanLegend(mode = "mag") {
+  document.getElementById("japan-legend").replaceChildren();
+  if (mode === "depth") {
+    drawDepthLegend("japan-legend");
+  } else {
+    // The Japan map shows M2+, so its smallest band starts at 2.
+    drawMagLegend("japan-legend", [{ ...MAG_BANDS[0], label: "2–3" }, ...MAG_BANDS.slice(1)]);
+  }
   const item = document.createElement("span");
   item.className = "item";
   const line = document.createElement("span");
@@ -423,33 +485,17 @@ function drawJapanLegend() {
 // Shindo levels from 5- up are the ones that cause damage; colour them so they stand out.
 const shindoClass = (s) => (/^[67]/.test(s) ? "shindo severe" : /^5/.test(s) ? "shindo strong" : "shindo");
 
-function drawJapanSide(table, felt, coverage) {
-  const quakes = rowsToObjects(table);
-  setText("jp-count", (table.located_total ?? quakes.length).toLocaleString("en-US"));
-  if (table.usgs_total != null) {
-    setText("jp-count-note", `located by JMA (USGS lists ${table.usgs_total.toLocaleString("en-US")})`);
-  }
-  if (quakes.length) {
-    const top = quakes.reduce((a, b) => (b.mag > a.mag ? b : a));
-    setText("jp-max", `M${top.mag.toFixed(1)}`);
-    setText("jp-max-note", prettyPlace(top.place) || "");
-  }
-  if (table.newest) {
-    const fmtDay = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", month: "short", day: "numeric" });
-    setText(
-      "japan-note",
-      `M${table.min_mag.toFixed(1)}+ shown. JMA publishes each day's list two days later, so the map runs to ` +
-        `${fmtDay.format(new Date(table.newest))}; recent days are preliminary.`,
-    );
-  }
+const fmtFeltWhen = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Tokyo", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
 
-  const fmtWhen = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-  const tbody = document.querySelector("#japan-table tbody");
-  tbody.replaceChildren(
-    ...rowsToObjects(felt).map((q) => {
+// One row per felt quake: when, shindo badge, magnitude, where. Used by both felt tables.
+function drawFeltTable(selector, table) {
+  document.querySelector(selector).replaceChildren(
+    ...rowsToObjects(table).map((q) => {
       const tr = document.createElement("tr");
       const cells = [
-        ["when", fmtWhen.format(new Date(q.time))],
+        ["when", fmtFeltWhen.format(new Date(q.time))],
         ["num", null],
         ["num mag", q.mag == null ? "–" : q.mag.toFixed(1)],
         ["", prettyPlace(q.place) || "Unknown location"],
@@ -470,6 +516,34 @@ function drawJapanSide(table, felt, coverage) {
       return tr;
     }),
   );
+}
+
+function drawJapanSide(table, felt, shaking, coverage) {
+  const quakes = rowsToObjects(table);
+  setText("jp-count", (table.located_total ?? quakes.length).toLocaleString("en-US"));
+  if (table.usgs_total != null) {
+    setText("jp-count-note", `located by JMA (USGS lists ${table.usgs_total.toLocaleString("en-US")})`);
+  }
+  if (quakes.length) {
+    const top = quakes.reduce((a, b) => (b.mag > a.mag ? b : a));
+    setText("jp-max", `M${top.mag.toFixed(1)}`);
+    setText("jp-max-note", prettyPlace(top.place) || "");
+  }
+  if (table.newest) {
+    const fmtDay = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", month: "short", day: "numeric" });
+    setText(
+      "japan-note",
+      `M${table.min_mag.toFixed(1)}+ shown. JMA publishes each day's list two days later, so the map runs to ` +
+        `${fmtDay.format(new Date(table.newest))}; recent days are preliminary.`,
+    );
+  }
+
+  drawFeltTable("#japan-table tbody", felt);
+  if (shaking) {
+    document.getElementById("shaking-block").hidden = false;
+    drawFeltTable("#shaking-table tbody", shaking);
+    document.getElementById("shaking-empty").hidden = shaking.rows.length > 0;
+  }
 
   if (coverage && coverage.rows.length) {
     document.getElementById("coverage-block").hidden = false;
@@ -590,14 +664,15 @@ async function main() {
   // The Japan section is built from JMA data; until that source exists the page hides it.
   const japan = await getJSON("data/japan_quakes.json");
   if (japan.source === "jma") {
-    const [felt, coverage] = await Promise.all([
+    const [felt, shaking, coverage] = await Promise.all([
       getJSON("data/japan_felt.json"),
+      getJSON("data/japan_strongest_shaking.json").catch(() => null),
       getJSON("data/jma_usgs_coverage.json").catch(() => null),
     ]);
     document.querySelector(".card.japan").hidden = false;
     drawJapanLegend();
-    drawJapanSide(japan, felt, coverage);
-    buildJapanMap(land, plates, rowsToObjects(japan));
+    drawJapanSide(japan, felt, shaking, coverage);
+    setupColorToggle(buildJapanMap(land, plates, rowsToObjects(japan)));
   }
   const quakes = rowsToObjects(recent);
 

@@ -17,6 +17,10 @@
   --mag-3: #5c49d1;
   --mag-4: #4031a8;
   --mag-5: #281b72;
+  --depth-1: #86b6ef;
+  --depth-2: #3987e5;
+  --depth-3: #1c5cab;
+  --depth-4: #0d366b;
   --plate-line: #6f6d68;
   --good: #0ca30c;
   --warning: #fab219;
@@ -41,6 +45,10 @@
     --mag-3: #9488ea;
     --mag-4: #b6aef2;
     --mag-5: #dcd8fa;
+    --depth-1: #b7d3f6;
+    --depth-2: #6da7ec;
+    --depth-3: #2a78d6;
+    --depth-4: #184f95;
     --plate-line: #9a9890;
   }
 }
@@ -62,6 +70,10 @@
   --mag-3: #9488ea;
   --mag-4: #b6aef2;
   --mag-5: #dcd8fa;
+  --depth-1: #b7d3f6;
+  --depth-2: #6da7ec;
+  --depth-3: #2a78d6;
+  --depth-4: #184f95;
   --plate-line: #9a9890;
 }
 
@@ -106,6 +118,7 @@ header.top p { margin: 4px 0 0; color: var(--text-secondary); }
 .legend .line { display: inline-block; width: 22px; border-top: 2px solid; border-radius: 2px; }
 .legend .line.thick { border-top-width: 4px; }
 .legend .dot { display: inline-block; border-radius: 50%; }
+.legend .muted { color: var(--text-muted); }
 .legend .sep { width: 1px; height: 16px; background: var(--grid); }
 .legend .mag-legend { gap: 6px 14px; flex-wrap: wrap; }
 .legend .mag-legend .item { gap: 6px; }
@@ -179,6 +192,14 @@ details.table-view .table-scroll { max-height: 240px; overflow-y: auto; margin-t
 .mini-stats .value { font-size: 26px; font-weight: 640; line-height: 1.2; }
 .mini-stats .note { color: var(--text-muted); font-size: 12px; }
 .japan-side h3 { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+.japan-side h3.spaced { margin-top: 20px; }
+.map-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 13px; color: var(--text-secondary); }
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; padding: 2px; gap: 2px; }
+.segmented button { font: inherit; color: var(--text-secondary); background: none; border: 0; border-radius: 6px;
+  padding: 4px 12px; cursor: pointer; }
+.segmented button:hover { color: var(--text-primary); }
+.segmented button[aria-pressed="true"] { background: var(--grid); color: var(--text-primary); font-weight: 600; }
+.segmented button:focus-visible { outline: 2px solid var(--plate-divergent); outline-offset: 1px; }
 #coverage-block { margin-top: 20px; }
 .note-line { color: var(--text-muted); font-size: 12px; margin: 6px 0 0; }
 .shindo { display: inline-block; min-width: 2.2em; padding: 1px 6px; border-radius: 6px; text-align: center;
