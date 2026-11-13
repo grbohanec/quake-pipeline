@@ -78,6 +78,16 @@
           <div id="japan-map" role="img" aria-label="Map of earthquakes around Japan in the last 30 days, coloured by magnitude"></div>
           <div class="legend" id="japan-legend" aria-label="Map legend"></div>
           <p class="note-line" id="japan-note"></p>
+          <div id="coverage-block" hidden>
+            <h3>Why a second source</h3>
+            <div class="table-scroll">
+              <table class="ranked" id="coverage-table">
+                <thead><tr><th title="JMA magnitude">Mag</th><th class="num" title="Earthquakes in the JMA catalog">JMA</th><th class="num" title="Share also in the USGS catalog">In USGS</th><th class="num" title="Median of USGS magnitude minus JMA magnitude, for the same quakes">Mag gap</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p class="note-line">Quakes near Japan since 2000 by JMA magnitude, linked across the two catalogs by time and distance. Mag gap: median USGS magnitude minus JMA magnitude for the same quake.</p>
+          </div>
         </div>
         <div class="japan-side">
           <div class="mini-stats">
@@ -102,16 +112,6 @@
             <p class="note-line" id="shaking-empty" hidden>No felt earthquakes recorded in the last 30 days.</p>
           </div>
           <p class="note-line">Shindo (震度) is JMA's 1–7 scale for how strongly shaking was felt at the surface. Strongest list: ranked by shindo, then magnitude.</p>
-          <div id="coverage-block" hidden>
-            <h3>Why a second source</h3>
-            <div class="table-scroll">
-              <table class="ranked" id="coverage-table">
-                <thead><tr><th title="JMA magnitude">Mag</th><th class="num" title="Earthquakes in the JMA catalog">JMA</th><th class="num" title="Share also in the USGS catalog">In USGS</th><th class="num" title="Median of USGS magnitude minus JMA magnitude, for the same quakes">Mag gap</th></tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <p class="note-line">Quakes near Japan since 2000 by JMA magnitude, linked across the two catalogs by time and distance. Mag gap: median USGS magnitude minus JMA magnitude for the same quake.</p>
-          </div>
         </div>
       </div>
     </section>
