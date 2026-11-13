@@ -181,9 +181,35 @@ def test_japan_tables_from_jma(tmp_path):
     assert q["mag"] == 3.1 and q["place"] == "E OFF MIYAGI PREF"  # English name borrowed from the catalog
     [felt] = objects(t["japan_felt"])
     assert felt["shindo"] == "5+" and felt["place"] == "Plain Area of Southern Miyazaki Prefecture"
+    [strongest] = objects(t["japan_strongest_shaking"])
+    assert strongest["id"] == "e1" and t["japan_strongest_shaking"]["days"] == 30
     coverage = {r["band"]: r for r in objects(t["jma_usgs_coverage"])}
     assert coverage[5]["jma_quakes"] == 1 and coverage[5]["in_usgs"] == 1
     assert coverage[5]["median_mag_diff"] == pytest.approx(0.2)
+
+
+def test_strongest_shaking_ranks_by_shindo_within_30_days(tmp_path):
+    raw = tmp_path / "raw" / "jma"
+    write_catalog_zip(raw, "h2023.zip", [catalog_line(datetime(2023, 3, 1, 21), 38.1, 142.0, mag=5.4)])
+    write_feed(
+        raw,
+        "20261007T000000Z",
+        [
+            feed_entry("old7", "2026-08-20T10:00:00+09:00", maxi="7", mag="7.0"),  # older than 30 days
+            feed_entry("s5", "2026-10-01T10:00:00+09:00", maxi="5", mag="5.0"),  # pre-1996 style single 5
+            feed_entry("s5p", "2026-10-02T10:00:00+09:00", maxi="5+", mag="5.1"),
+            feed_entry("s6m", "2026-10-03T10:00:00+09:00", maxi="6-", mag="4.8"),
+            feed_entry("s3a", "2026-10-04T10:00:00+09:00", maxi="3", mag="3.0"),
+            feed_entry("s3b", "2026-10-05T10:00:00+09:00", maxi="3", mag="3.9"),  # same shindo, bigger
+        ],
+    )
+    clean_jma.build(tmp_path)
+    build_clean(tmp_path, [quake("a", NOW - timedelta(days=1))])
+
+    t = gold.build_tables(tmp_path, NOW)
+    ids = [r["id"] for r in objects(t["japan_strongest_shaking"])]
+    assert ids == ["s6m", "s5p", "s5", "s3b", "s3a"]
+    assert len(objects(t["japan_felt"])) == 6  # the recent list is unchanged: newest first, any age
 
 
 def test_pipeline_health_groups_datasets_by_run(tmp_path):

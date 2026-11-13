@@ -34,6 +34,9 @@ RUNS_SHOWN = 30
 JAPAN_BBOX = {"lat": (24, 46), "lon": (122, 150)}
 JAPAN_MAP_MIN_MAG = 2.0  # JMA locates thousands of tiny quakes a month; the map keeps the ones people notice
 FELT_SHOWN = 10
+# JMA shindo levels, weakest to strongest. 5 and 6 were single levels until 1996, so they sit
+# between their lower and upper halves.
+SHINDO_ORDER = ["1", "2", "3", "4", "5-", "5", "5+", "6-", "6", "6+", "7"]
 
 
 def _rows(con: duckdb.DuckDBPyConnection, sql: str) -> tuple[list[str], list[list]]:
@@ -243,6 +246,25 @@ def _japan_tables(con: duckdb.DuckDBPyConnection, data_dir: Path, now: datetime)
         """,
         )
     tables["japan_felt"] = {"columns": cols, "rows": rows}
+
+    # Strongest shaking in the last 30 days: the same felt quakes, ranked by shindo
+    # (then magnitude). Shindo, not magnitude, is what people on the ground felt.
+    cols, rows = ["time", "lat", "lon", "depth", "mag", "shindo", "place", "id"], []
+    if any(felt_dir.glob("year=*/*.parquet")):
+        order = "[" + ", ".join(f"'{v}'" for v in SHINDO_ORDER) + "]"
+        cols, rows = _rows(
+            con,
+            f"""
+            SELECT epoch_ms(event_time) AS time, latitude AS lat, longitude AS lon, depth_km AS depth, mag,
+                   max_intensity AS shindo, coalesce(region_en, region) AS place, report_id AS id
+            FROM read_parquet('{(felt_dir / "**" / "*.parquet").as_posix()}', hive_partitioning = true)
+            WHERE event_time >= {since}
+            ORDER BY list_position({order}, max_intensity) DESC NULLS LAST,
+                     mag DESC NULLS LAST, event_time DESC
+            LIMIT {FELT_SHOWN}
+        """,
+        )
+    tables["japan_strongest_shaking"] = {"columns": cols, "rows": rows, "days": MAP_DAYS}
 
     # Why a second source: share of JMA's quakes around Japan that USGS also has,
     # and how the magnitudes compare, by magnitude band (since 2000).
